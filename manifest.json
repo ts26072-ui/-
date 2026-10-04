@@ -1,0 +1,8 @@
+{
+  "name": "익명방",
+  "short_name": "익명방",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1f2937",
+  "theme_color": "#1f2937"
+}

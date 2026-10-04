@@ -1,0 +1,9 @@
+{
+  "appId": "com.example.anonchat",
+  "appName": "익명방",
+  "webDir": "public",
+  "server": {
+    "url": "https://YOUR-SERVER-ADDRESS",
+    "cleartext": false
+  }
+}
