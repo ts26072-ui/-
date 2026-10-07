@@ -1423,7 +1423,7 @@ $('nBack').onclick = () => (nView === 'list' ? showTab('more') : notesList());
 const PN = {
   db: null, id: null, isNew: false, title: '', strokes: [], hist: [[]], hi: 0, tool: 'pen', color: '#16181d',
   size: { pen: 3, pencil: 2.2, ball: 2.6, fountain: 3.4, marker: 8, hl: 14, er: 20 }, v: { s: 1, x: 0, y: 0 }, W: 600, H: 900, bg: 'plain',
-  imgs: [], sel: null, drag: null, ic: new Map(), fingerPan: false, manual: false, cur: null, ptrs: new Map(), gest: null, pan: null, erased: false,
+  imgs: [], sel: null, drag: null, ic: new Map(), fingerPan: false, manual: false, cur: null, ptrs: new Map(), gest: null, pan: null, erased: false, loading: false, renderQueued: false,
   dirty: false, timer: 0, editing: false, cw: 0, ch: 0, dpr: 1, funcDegree: 4, funcScale: 50, autoShape: false,
 };
 const PN_COLORS = ['#16181d', '#6b7280', '#dc2626', '#f97316', '#f59e0b', '#facc15', '#84cc16', '#16a34a', '#0d9488', '#06b6d4', '#2563eb', '#4f46e5', '#9333ea', '#db2777', '#f472b6', '#92400e'];
@@ -1618,7 +1618,7 @@ function pnRender() {
     if (PN.bg === 'grid') for (let X = 30; X < PN.W; X += 30) { x.moveTo(X, 0); x.lineTo(X, PN.H); }
     x.stroke();
   }
-  pnDrawImgs(x);
+  pnDrawImgs(x, null, true);
   PN.strokes.forEach((st) => pnDrawStroke(x, st));
   if (PN.cur && PN.cur.st) pnDrawStroke(x, PN.cur.st);
   x.restore();
@@ -1631,15 +1631,34 @@ function pnRender() {
     x.restore();
   }
 }
+function pnQueueRender() {
+  if (PN.loading || PN.cur) return;
+  if (PN.renderQueued) return;
+  PN.renderQueued = true;
+  requestAnimationFrame(() => { PN.renderQueued = false; if (!PN.loading && !PN.cur) pnRender(); });
+}
 function pnImg(m) {
   let el = PN.ic.get(m.id);
-  if (!el) { el = new Image(); el.onload = () => pnRender(); el.src = m.src; PN.ic.set(m.id, el); }
+  if (!el) {
+    el = new Image();
+    el.onload = () => pnQueueRender();
+    el.src = m.src;
+    PN.ic.set(m.id, el);
+  }
   return el;
 }
 const pnImgReady = (m) => new Promise((res) => { const el = pnImg(m); if (el.complete) res(); else { el.addEventListener('load', res); el.addEventListener('error', res); } });
-function pnDrawImgs(x, list) {
+function pnDrawImgs(x, list, cull = false) {
   const L = list || PN.imgs;
+  let vx0 = -Infinity, vy0 = -Infinity, vx1 = Infinity, vy1 = Infinity;
+  if (cull && PN.v && PN.v.s > 0) {
+    vx0 = Math.max(0, (0 - PN.v.x) / PN.v.s);
+    vy0 = Math.max(0, (0 - PN.v.y) / PN.v.s);
+    vx1 = Math.min(PN.W, (PN.cw - PN.v.x) / PN.v.s);
+    vy1 = Math.min(PN.H, (PN.ch - PN.v.y) / PN.v.s);
+  }
   for (const m of [...L.filter((q) => q.bg), ...L.filter((q) => !q.bg)]) {
+    if (cull && (m.x + m.w < vx0 || m.x > vx1 || m.y + m.h < vy0 || m.y > vy1)) continue;
     const el = pnImg(m);
     if (el.complete && el.naturalWidth) x.drawImage(el, m.x, m.y, m.w, m.h);
   }
@@ -2047,9 +2066,13 @@ async function pnImport(file) {
       y += hh + 8;
     }
   } catch { toast(isPdf ? 'PDF를 열 수 없어요. 인터넷 연결을 확인하거나 사진으로 저장해서 불러와 주세요.' : '이 파일은 열 수 없어요.'); return; }
+  PN.loading = true;
   PN.imgs = [...PN.imgs, ...add];
   PN.H = hadBg ? Math.max(PN.H, Math.ceil(y)) : Math.ceil(y);
   PN.bg = 'plain';
+  // PDF 페이지 이미지를 미리 디코드해 필기 시작 직후의 백그라운드 렌더링 지연을 막습니다.
+  await Promise.all(add.map(pnImgReady));
+  PN.loading = false;
   if (!PN.title.trim()) { PN.title = file.name.replace(/\.[^.]+$/, '').slice(0, 40); $('pName').value = PN.title; }
   PN.tool = 'pen'; PN.sel = null; pnPush(); pnTools(); pnFit();
   toast('파일을 불러왔어요. 위에 바로 필기할 수 있어요.');
