@@ -298,7 +298,8 @@ async function handleSchool(res, url) {
     return json(res, 404, { error: 'not found' });
   } catch (e) {
     if (e.nokey) return json(res, 503, { error: '서버에 NEIS_KEY가 설정되지 않았어요. (open.neis.go.kr 에서 무료 발급)' });
-    json(res, 502, { error: '학교 정보를 가져오지 못했어요. 잠시 후 다시 시도해 주세요.' });
+    console.error('[school]', p, e && e.message);
+    json(res, 502, { error: '학교 정보를 가져오지 못했어요 (' + String((e && e.message) || e).slice(0, 80) + ')' });
   }
 }
 
