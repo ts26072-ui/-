@@ -17,6 +17,32 @@ const uid = () => Array.from({ length: 32 }, () => '0123456789abcdef'[Math.floor
 const mock = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   res.setHeader('Content-Type', 'application/json');
+  if (u.pathname === '/gtoken') { // 구글 토큰 흉내
+    let b = ''; req.on('data', (c) => { b += c; });
+    return req.on('end', () => {
+      const f = new URLSearchParams(b);
+      if (f.get('grant_type') === 'authorization_code') return res.end(JSON.stringify(f.get('code') === 'good' ? { access_token: 'at1', refresh_token: 'rt1', expires_in: 3600 } : { error: 'invalid_grant' }));
+      res.end(JSON.stringify(f.get('refresh_token') === 'rt1' ? { access_token: 'at1', expires_in: 3600 } : { error: 'invalid_grant' }));
+    });
+  }
+  if (u.pathname.startsWith('/classroom/') || u.pathname.startsWith('/drive/')) {
+    if (req.headers.authorization !== 'Bearer at1') { res.statusCode = 401; return res.end('{}'); }
+    const pth = u.pathname;
+    if (pth === '/classroom/courses') return res.end(JSON.stringify({ courses: [{ id: 'c1', name: '수학' }] }));
+    if (pth === '/classroom/courses/c1/courseWork') return res.end(JSON.stringify({ courseWork: [{ title: '1단원 학습지', updateTime: '2026-10-05T01:00:00Z', materials: [
+      { driveFile: { driveFile: { id: 'pdf123', title: '학습지1.pdf' } } }, { driveFile: { driveFile: { id: 'doc123', title: '한글 설명문서.docx' } } }, { link: { url: 'https://x' } }] }] }));
+    if (pth === '/classroom/courses/c1/courseWorkMaterials') return res.end(JSON.stringify({ courseWorkMaterial: [{ title: '자료', updateTime: '2026-10-06T01:00:00Z', materials: [{ driveFile: { driveFile: { id: 'gdoc123', title: '정리노트' } } }] }] }));
+    if (pth === '/classroom/courses/c1/announcements') { res.statusCode = 403; return res.end('{}'); }
+    const m = /^\/drive\/files\/([\w-]+)(\/export)?$/.exec(pth);
+    if (m) {
+      const meta = { pdf123: { name: '학습지1.pdf', mimeType: 'application/pdf', size: '8' }, doc123: { name: 'a.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: '3' },
+        gdoc123: { name: '정리노트', mimeType: 'application/vnd.google-apps.document' } }[m[1]];
+      if (!meta) { res.statusCode = 404; return res.end('{}'); }
+      if (!m[2] && u.searchParams.get('fields')) return res.end(JSON.stringify(meta));
+      res.setHeader('Content-Type', 'application/octet-stream'); return res.end(Buffer.from(m[2] ? '%PDF-gdoc' : '%PDF-1.4'));
+    }
+    res.statusCode = 404; return res.end('{}');
+  }
   if (u.pathname.startsWith('/hub/')) { // NEIS 흉내
     const name = u.pathname.slice(5), g = (k) => u.searchParams.get(k);
     if (g('KEY') !== 'k') return res.end(JSON.stringify({ RESULT: { CODE: 'ERROR-290', MESSAGE: '인증키가 유효하지 않습니다.' } }));
@@ -42,7 +68,9 @@ const mock = http.createServer((req, res) => {
 });
 
 const server = spawn('node', ['server.js'], { env: { ...process.env, PORT, DATA_DIR: dataDir, ADMIN_KEY: KEY,
-  NEIS_URL: `http://localhost:${MOCK}/hub/`, NEIS_KEY: 'k', DICT_URL: `http://localhost:${MOCK}/entries/`, TRANSLATE_URL: `http://localhost:${MOCK}/get` }, stdio: 'ignore' });
+  NEIS_URL: `http://localhost:${MOCK}/hub/`, NEIS_KEY: 'k', DICT_URL: `http://localhost:${MOCK}/entries/`, TRANSLATE_URL: `http://localhost:${MOCK}/get`,
+  GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'sec', PUBLIC_URL: base, GOOGLE_AUTH_URL: `http://localhost:${MOCK}/gauth`, GOOGLE_TOKEN_URL: `http://localhost:${MOCK}/gtoken`,
+  GOOGLE_REVOKE_URL: `http://localhost:${MOCK}/grevoke`, CLASSROOM_URL: `http://localhost:${MOCK}/classroom/`, DRIVE_URL: `http://localhost:${MOCK}/drive/` }, stdio: 'ignore' });
 
 function api(method, p, u, body, extra) {
   return fetch(base + p, { method, headers: { 'Content-Type': 'application/json', 'x-uid': u, ...(extra || {}) }, body: method === 'GET' ? undefined : JSON.stringify(body || {}) })
@@ -182,6 +210,39 @@ async function upload(u, type, buf) {
   check('마감 후 신청 불가', (await api('POST', '/api/apply/' + ap.id + '/join', A)).status === 400);
   await api('POST', '/api/admin/apply/delete', A, { id: ap.id }, ADM);
   check('삭제', (await api('GET', '/api/apply/list', A)).body.items.length === 0);
+
+  // 구글 클래스룸
+  const G = uid();
+  check('클래스룸: 연결 전 상태', JSON.stringify((await api('GET', '/api/gc/status', G)).body) === '{"configured":true,"linked":false}');
+  check('클래스룸: 연결 전 목록은 401', (await api('GET', '/api/gc/files', G)).status === 401);
+  const au = (await api('GET', '/api/gc/auth', G)).body.url, aq = new URL(au).searchParams;
+  check('클래스룸: 로그인 주소(읽기 전용 범위·콜백)', aq.get('client_id') === 'cid' && aq.get('redirect_uri') === base + '/api/gc/callback' && aq.get('scope').includes('classroom.coursework.me.readonly') && !aq.get('scope').includes('.coursework.students'));
+  check('클래스룸: 모르는 state는 거부', (await fetch(base + '/api/gc/callback?code=good&state=nope')).status === 400);
+  check('클래스룸: 잘못된 code는 실패', (await fetch(base + '/api/gc/callback?code=bad&state=' + aq.get('state'))).status === 400);
+  const au2 = new URL((await api('GET', '/api/gc/auth', G)).body.url).searchParams.get('state');
+  const cb = await fetch(base + '/api/gc/callback?code=good&state=' + au2);
+  check('클래스룸: 연결 완료 화면', cb.status === 200 && (await cb.text()).includes('연결됐어요'));
+  check('클래스룸: state는 한 번만 사용', (await fetch(base + '/api/gc/callback?code=good&state=' + au2)).status === 400);
+  check('클래스룸: 연결됨', (await api('GET', '/api/gc/status', G)).body.linked === true);
+  check('클래스룸: 다른 기기는 연결 안 됨', (await api('GET', '/api/gc/status', A)).body.linked === false);
+  const gl = (await api('GET', '/api/gc/files', G)).body.files;
+  check('클래스룸: 첨부 파일 모아 보기(최신순, 공지 403은 건너뜀)', gl.length === 3 && gl[0].id === 'gdoc123' && gl[1].id === 'pdf123' && gl[0].course === '수학');
+  check('클래스룸: docx는 노트로 열 수 없다고 표시', gl.find((f) => f.id === 'doc123').openable === false && gl.find((f) => f.id === 'pdf123').openable === true);
+  await sleep(800);
+  const fr = await fetch(base + '/api/gc/file?id=pdf123', { headers: { 'x-uid': G } });
+  check('클래스룸: PDF 받기', fr.status === 200 && fr.headers.get('content-type') === 'application/pdf' && decodeURIComponent(fr.headers.get('x-file-name')) === '학습지1.pdf' && (await fr.text()) === '%PDF-1.4');
+  await sleep(800);
+  const gr = await fetch(base + '/api/gc/file?id=gdoc123', { headers: { 'x-uid': G } });
+  check('클래스룸: 구글 문서는 PDF로 변환해 받기', gr.status === 200 && decodeURIComponent(gr.headers.get('x-file-name')) === '정리노트.pdf' && (await gr.text()) === '%PDF-gdoc');
+  await sleep(800);
+  check('클래스룸: docx는 415', (await api('GET', '/api/gc/file?id=doc123', G)).status === 415);
+  await sleep(800);
+  check('클래스룸: 없는 파일 404', (await api('GET', '/api/gc/file?id=nofile', G)).status === 404);
+  await sleep(800);
+  check('클래스룸: 이상한 id 400', (await api('GET', '/api/gc/file?id=' + encodeURIComponent('../x'), G)).status === 400);
+  check('클래스룸: 연결 안 한 기기는 파일 못 받음', (await api('GET', '/api/gc/file?id=pdf123', A)).status === 401);
+  check('클래스룸: 연결 끊기', (await api('POST', '/api/gc/unlink', G)).body.ok === true && (await api('GET', '/api/gc/status', G)).body.linked === false);
+  check('클래스룸: 끊은 뒤 목록 401', (await api('GET', '/api/gc/files', G)).status === 401);
 
   // 화면
   const html = await (await fetch(base + '/')).text();
