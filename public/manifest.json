@@ -4,5 +4,7 @@
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#ffffff"
+  "theme_color": "#ffffff",
+  "lang": "ko-KR",
+  "description": "수업 자료, 필기 노트, 수행평가와 학교 정보를 한곳에서 관리하는 학습 앱"
 }

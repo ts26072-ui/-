@@ -1422,12 +1422,12 @@ $('nBack').onclick = () => (nView === 'list' ? showTab('more') : notesList());
 // ───────── 내 필기 노트 (손글씨 · 이 기기에만 저장) ─────────
 const PN = {
   db: null, id: null, isNew: false, title: '', strokes: [], hist: [[]], hi: 0, tool: 'pen', color: '#16181d',
-  size: { pen: 3, hl: 14, er: 20 }, v: { s: 1, x: 0, y: 0 }, W: 600, H: 900, bg: 'plain',
+  size: { pen: 3, pencil: 2.2, ball: 2.6, fountain: 3.4, marker: 8, hl: 14, er: 20 }, v: { s: 1, x: 0, y: 0 }, W: 600, H: 900, bg: 'plain',
   imgs: [], sel: null, drag: null, ic: new Map(), fingerPan: false, manual: false, cur: null, ptrs: new Map(), gest: null, pan: null, erased: false,
   dirty: false, timer: 0, editing: false, cw: 0, ch: 0, dpr: 1,
 };
 const PN_COLORS = ['#16181d', '#6b7280', '#dc2626', '#f97316', '#f59e0b', '#facc15', '#84cc16', '#16a34a', '#0d9488', '#06b6d4', '#2563eb', '#4f46e5', '#9333ea', '#db2777', '#f472b6', '#92400e'];
-const PN_RANGE = { pen: [0.5, 20, 0.5], hl: [6, 48, 1], er: [8, 60, 1] };
+const PN_RANGE = { pen: [0.5, 20, 0.5], pencil: [0.5, 10, 0.5], ball: [0.5, 12, 0.5], fountain: [1, 16, 0.5], marker: [3, 28, 1], hl: [6, 48, 1], er: [8, 60, 1] };
 const PN_BG = { plain: '빈 종이', lined: '줄 노트', grid: '모눈' };
 const pnCv = $('pCv'), pnCtx = pnCv.getContext('2d');
 const r1 = (n) => Math.round(n * 10) / 10;
@@ -1578,6 +1578,10 @@ function pnApplyView(x) { const k = PN.dpr, v = PN.v; x.setTransform(k * v.s, 0,
 function pnPenPart(x, st, k) {
   const p = st.p, n = p.length, mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   x.strokeStyle = st.c; x.fillStyle = st.c; x.lineCap = 'round'; x.lineJoin = 'round';
+  if (st.t === 'pencil') x.globalAlpha = 0.72;
+  else if (st.t === 'ball') x.globalAlpha = 0.92;
+  else if (st.t === 'fountain') x.globalAlpha = 0.97;
+  else if (st.t === 'marker') x.globalAlpha = 0.55;
   if (n === 1) { x.beginPath(); x.arc(p[0][0], p[0][1], Math.max(0.3, st.w * p[0][2] / 2), 0, 6.2832); x.fill(); return; }
   let a, c, ctrl = null;
   if (k === 0) { a = p[0]; c = mid(p[0], p[1]); }
@@ -1587,6 +1591,7 @@ function pnPenPart(x, st, k) {
   x.beginPath(); x.moveTo(a[0], a[1]);
   if (ctrl) x.quadraticCurveTo(ctrl[0], ctrl[1], c[0], c[1]); else x.lineTo(c[0], c[1]);
   x.stroke();
+  if (st.t !== 'pen') x.globalAlpha = 1;
 }
 function pnDrawStroke(x, st) {
   const p = st.p, n = p.length; if (!n) return;
@@ -1663,6 +1668,75 @@ function pnErase(wx, wy) {
 function pnEraseLine(ax, ay, bx, by) {
   const step = Math.max(1, PN.size.er / 3 / PN.v.s), n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
   for (let i = 1; i <= n; i++) pnErase(ax + (bx - ax) * i / n, ay + (by - ay) * i / n);
+}
+
+// ───────── 필기 보정: 도형 + 1~4차 함수 ─────────
+const pnDist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const pnBBox = (p) => { const xs = p.map(q => q[0]), ys = p.map(q => q[1]); return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) }; };
+function pnStrokeLength(p) { let n = 0; for (let i = 1; i < p.length; i++) n += pnDist(p[i - 1], p[i]); return n; }
+function pnShapeStroke(type, a, b, c, d, base) {
+  const pts = [], push = (x,y) => pts.push([r1(x), r1(y), 1]);
+  if (type === 'line') { const n=40; for(let i=0;i<=n;i++){const t=i/n;push(a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t);} }
+  if (type === 'rect') { [[a[0],a[1]],[b[0],a[1]],[b[0],b[1]],[a[0],b[1]],[a[0],a[1]]].forEach(q=>push(q[0],q[1])); }
+  if (type === 'circle') { const cx=(a[0]+b[0])/2, cy=(a[1]+b[1])/2, rx=Math.abs(b[0]-a[0])/2, ry=Math.abs(b[1]-a[1])/2; for(let i=0;i<=96;i++){const t=i/96*2*Math.PI;push(cx+rx*Math.cos(t),cy+ry*Math.sin(t));} }
+  if (type === 'triangle') { [a,b,c,a].forEach(q=>push(q[0],q[1])); }
+  if (type === 'arrow') { const ang=Math.atan2(b[1]-a[1],b[0]-a[0]), len=Math.max(10,Math.min(28,pnDist(a,b)*0.15)); const l=[b[0]-len*Math.cos(ang-Math.PI/6),b[1]-len*Math.sin(ang-Math.PI/6)], r=[b[0]-len*Math.cos(ang+Math.PI/6),b[1]-len*Math.sin(ang+Math.PI/6)]; [a,b,l,b,r].forEach(q=>push(q[0],q[1])); }
+  return { ...base, t:'pen', p:pts, corrected:type };
+}
+function pnRecognizeShape(st) {
+  if (!st || !st.p || st.p.length < 3) return null;
+  const p=st.p, bb=pnBBox(p), w=bb.maxX-bb.minX, h=bb.maxY-bb.minY, close=pnDist(p[0],p[p.length-1]) <= Math.max(18, Math.min(w,h)*0.22), len=pnStrokeLength(p), direct=pnDist(p[0],p[p.length-1]), straight=direct/Math.max(1,len);
+  if (straight > 0.965 && w > 25 && h < w*0.25) return pnShapeStroke('line',p[0],p[p.length-1],null,null,st);
+  if (close && w > 25 && h > 25) {
+    const ratio=w/h;
+    if (ratio > 0.65 && ratio < 1.5) return pnShapeStroke('circle',[bb.minX,bb.minY],[bb.maxX,bb.maxY],null,null,st);
+    const corners=[[bb.minX,bb.minY],[bb.maxX,bb.minY],[bb.maxX,bb.maxY],[bb.minX,bb.maxY]];
+    return pnShapeStroke('rect',corners[0],corners[2],null,null,st);
+  }
+  if (p.length >= 4) {
+    const start=p[0], end=p[p.length-1], d=pnDist(start,end);
+    const mid=p[Math.floor(p.length/2)], side=pnDist(start,mid)+pnDist(mid,end);
+    if (side/d > 1.15 && side/d < 3.5 && w>25 && h>25) return pnShapeStroke('arrow',start,end,null,null,st);
+  }
+  return null;
+}
+function pnCorrectShape() {
+  if (!PN.strokes.length) return toast('보정할 획이 없어요.');
+  const i=PN.strokes.length-1, st=PN.strokes[i], out=pnRecognizeShape(st);
+  if (!out) return toast('도형으로 인식하지 못했어요. 원·직선·사각형 등을 크게 한 번에 그려 보세요.');
+  PN.strokes=[...PN.strokes.slice(0,i),out]; pnPush(); pnRender(); toast((out.corrected||'도형')+'으로 보정했어요.');
+}
+function pnSolveLinear(A,b) {
+  const n=A.length, M=A.map((r,i)=>[...r,b[i]]);
+  for(let k=0;k<n;k++){let piv=k;for(let i=k+1;i<n;i++)if(Math.abs(M[i][k])>Math.abs(M[piv][k]))piv=i;if(Math.abs(M[piv][k])<1e-10)return null;[M[k],M[piv]]=[M[piv],M[k]];for(let i=k+1;i<n;i++){const f=M[i][k]/M[k][k];for(let j=k;j<=n;j++)M[i][j]-=f*M[k][j];}}
+  const x=Array(n);for(let i=n-1;i>=0;i--){let z=M[i][n];for(let j=i+1;j<n;j++)z-=M[i][j]*x[j];x[i]=z/M[i][i];}return x;
+}
+function pnPolyFit(points, degree) {
+  const xs=points.map(q=>q[0]), ys=points.map(q=>q[1]), mean=(xs.reduce((a,b)=>a+b,0)/xs.length), span=Math.max(1,(Math.max(...xs)-Math.min(...xs))/2);
+  const A=Array.from({length:degree+1},()=>Array(degree+1).fill(0)), B=Array(degree+1).fill(0);
+  for(let i=0;i<points.length;i++){const x=(xs[i]-mean)/span,y=ys[i], powers=Array(degree*2+1).fill(1);for(let k=1;k<powers.length;k++)powers[k]=powers[k-1]*x;for(let r=0;r<=degree;r++){B[r]+=y*powers[r];for(let c=0;c<=degree;c++)A[r][c]+=powers[r+c];}}
+  const coef=pnSolveLinear(A,B);if(!coef)return null;let sse=0,sy=0;for(const q of points)sy+=q[1];const ym=sy/points.length;let sst=0;for(const q of points){const x=(q[0]-mean)/span,p=coef.reduce((z,c,k)=>z+c*x**k,0);sse+=(q[1]-p)**2;sst+=(q[1]-ym)**2;}return {coef,mean,span,r2:sst?1-sse/sst:1,sse};
+}
+function pnCorrectFunction() {
+  const candidates=PN.strokes.filter(st=>['pen','pencil','ball','fountain','marker'].includes(st.t)&&st.p.length>=4);
+  if(!candidates.length)return toast('그래프로 그린 펜 획이 없어요.');
+  const all=candidates.flatMap(st=>st.p.map(q=>[q[0],q[1]]));
+  const longH=candidates.map((st,i)=>({st,i,bb:pnBBox(st.p),len:pnStrokeLength(st.p)})).filter(o=>o.bb.maxX-o.bb.minX>PN.W*0.35&&(o.bb.maxY-o.bb.minY)<24).sort((a,b)=>b.len-a.len)[0];
+  const longV=candidates.map((st,i)=>({st,i,bb:pnBBox(st.p),len:pnStrokeLength(st.p)})).filter(o=>o.bb.maxY-o.bb.minY>PN.H*0.35&&(o.bb.maxX-o.bb.minX)<24).sort((a,b)=>b.len-a.len)[0];
+  const y0=longH?(longH.bb.minY+longH.bb.maxY)/2:PN.H/2, x0=longV?(longV.bb.minX+longV.bb.maxX)/2:PN.W/2;
+  const degree=Math.max(1,Math.min(4,+(prompt('보정할 함수 차수를 입력하세요.\n1=일차, 2=이차, 3=삼차, 4=사차', '4')||'4')));
+  const scale=Math.max(10,Math.min(500,+(prompt('그래프의 1칸(1단위)을 몇 px로 볼까요?', '50')||'50')));
+  const axisStrokes=new Set([longH?.st,longV?.st].filter(Boolean));
+  const graphStrokes=candidates.filter(st=>!axisStrokes.has(st));
+  const pts=graphStrokes.flatMap(st=>st.p.map(q=>[q[0],q[1]])).filter(q=>Math.hypot(q[0]-x0,q[1]-y0)>10).map(q=>[(q[0]-x0)/scale,(y0-q[1])/scale]).filter(q=>Math.abs(q[0])<50&&Math.abs(q[1])<100);
+  if(pts.length<degree+2)return toast('함수 점이 부족해요. 좌표축과 함수 그래프를 함께 그려 주세요.');
+  const fit=pnPolyFit(pts,degree);if(!fit)return toast('함수 보정에 실패했어요. 그래프를 조금 더 크게 그려 보세요.');
+  const minX=Math.min(...pts.map(q=>q[0])),maxX=Math.max(...pts.map(q=>q[0])), out=[]; const base=graphStrokes[0]||candidates[0];
+  for(let i=0;i<=160;i++){const u=i/160,x=minX+(maxX-minX)*u,y=fit.coef.reduce((z,c,k)=>z+c*((x-fit.mean)/fit.span)**k,0);out.push([r1(x0+x*scale),r1(y0-y*scale),1]);}
+  const remove=new Set(graphStrokes);
+  PN.strokes=PN.strokes.filter(st=>!remove.has(st));
+  PN.strokes=[...PN.strokes,{...base,t:'pen',p:out,correctedFunction:{degree,coef:fit.coef,mean:fit.mean,span:fit.span,scale,x0,y0,r2:fit.r2}}];
+  pnPush();pnRender();toast(degree+'차 함수로 보정했어요 · R² '+fit.r2.toFixed(3));
 }
 
 // 입력 (펜 · 손가락 · 마우스)
@@ -1799,7 +1873,7 @@ function pnTools() {
   const tool = (name, icon, label) => b(icon, label, () => { PN.tool = name; if (name !== 'sel') PN.sel = null; pnTools(); pnRender(); }, t === name);
   const chip = (text, fn) => h('button', { class: 'chip', type: 'button', style: 'flex:none', text, onclick: fn });
   fill($('pTools1'),
-    tool('pen', 'pen', '펜'), tool('hl', 'hl', '형광펜'), tool('er', 'eraser', '지우개'), tool('sel', 'cursor', '사진 선택·크기 조절'), tool('hand', 'hand', '이동'),
+    tool('pen', 'pen', '펜'), tool('pencil', 'pencil', '연필'), tool('ball', 'pen', '볼펜'), tool('fountain', 'pen', '만년필'), tool('marker', 'hl', '마커'), tool('hl', 'hl', '형광펜'), tool('er', 'eraser', '지우개'), tool('sel', 'cursor', '사진 선택·크기 조절'), tool('hand', 'hand', '이동'),
     h('span', { class: 'sep' }),
     b('image', '사진 넣기', pnAddPhoto), b('clip', '파일 불러오기 (PDF·사진)', pnAddFile),
     h('span', { class: 'sep' }),
@@ -1809,6 +1883,8 @@ function pnTools() {
     h('span', { class: 'zl', id: 'pZl', text: Math.round(PN.v.s / pnFitScale() * 100) + '%' }),
     b('zoomIn', '확대', () => pnZoomAt(PN.cw / 2, PN.ch / 2, PN.v.s * 1.25)),
     b('fit', '화면에 맞추기', pnFit),
+    h('span', { class: 'sep' }),
+    chip('도형 보정', pnCorrectShape), chip('함수 보정(1~4차)', pnCorrectFunction),
     h('span', { class: 'sep' }),
     chip('배경: ' + PN_BG[PN.bg], () => { PN.bg = PN.bg === 'plain' ? 'lined' : PN.bg === 'lined' ? 'grid' : 'plain'; pnLater(); pnTools(); pnRender(); }),
     chip('페이지 늘리기', () => { if (PN.H >= 20000) return toast('더 늘릴 수 없어요.'); PN.H += 600; pnLater(); pnSetView(); toast('페이지를 아래로 늘렸어요.'); }),
@@ -2005,8 +2081,12 @@ function drawPerfCrit() {
       ta);
   };
   fill($('perfBody'),
-    h('div', { class: 'wform' }, h('button', { class: 'btn', type: 'button', text: '과목 추가', onclick: () => { PF.crit.push({ subject: '', w1: '', w2: '', w3: '', text: '' }); pfSave(); drawPerf(); } })),
-    PF.crit.length ? PF.crit.map(mk) : msg('학교 평가계획(학업성적관리규정)에서\n과목별 반영 비율과 수행평가 영역을 보고\n여기에 정리해 두면 한눈에 볼 수 있어요.'));
+    h('div', { class: 'wform' },
+      h('button', { class: 'btn', type: 'button', text: '과목 추가', onclick: () => { PF.crit.push({ subject: '', w1: '', w2: '', w3: '', text: '' }); pfSave(); drawPerf(); } }),
+      h('button', { class: 'btn ghost', type: 'button', text: '학교알리미 평가기준 열기', onclick: () => window.open('https://www.schoolinfo.go.kr/ei/ss/Pneiss_b01_s0.do?SHL_IDF_CD=aafabd77-68e0-43c5-a706-bb65fc985d7a', '_blank', 'noopener') }),
+      h('button', { class: 'btn ghost', type: 'button', text: '2026 2학기 학교 평가계획', onclick: () => window.open('https://dshs.dge.hs.kr/dshsh/na/ntt/selectNttInfo.do?mi=10018600&nttSn=41288447', '_blank', 'noopener') })
+    ),
+    PF.crit.length ? PF.crit.map(mk) : msg('학교알리미의\n「교과별(학년별) 교수·학습 및 평가계획에 관한 사항」을 확인한 뒤\n과목별 반영 비율과 평가영역을 저장해 두면 한눈에 볼 수 있어요.'));
 }
 
 
@@ -2053,15 +2133,18 @@ async function drawGc() {
   const unlink = btn('연결 끊기', async () => { if (!confirm('구글 클래스룸 연결을 끊을까요?')) return; await api('POST', '/api/gc/unlink'); LS.set('gcLinked', ''); LS.del('gcSeen'); drawGc(); }, 'lnk adm');
   if (!d) { fill(body, msg('클래스룸에서 가져오지 못했어요.'), h('div', { style: 'text-align:center' }, btn('다시 시도', drawGc, 'btn ghost'), ' ', unlink)); return; }
   const seen = gcSeenSet(), fresh = d.files.filter((f) => !seen.has(f.id) && f.openable);
+  const groups = new Map(); d.files.forEach(f => { const k=f.course||'기타'; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(f); });
   const row = (f) => h('div', { class: 'pfrow' },
     h('span', { class: 'pfd' + (!seen.has(f.id) ? ' soon' : ''), text: !seen.has(f.id) ? 'NEW' : '·' }),
-    h('div', { class: 'pfm' }, h('b', { text: f.title }), h('span', { text: f.course + (f.from ? ' · ' + f.from : '') + (f.ts ? ' · ' + new Date(f.ts).toISOString().slice(5, 10).replace('-', '.') : '') })),
+    h('div', { class: 'pfm' }, h('b', { text: f.title }), h('span', { text: (f.from || '') + (f.ts ? ' · ' + new Date(f.ts).toISOString().slice(5, 10).replace('-', '.') : '') })),
     f.openable ? btn('필기로 열기', () => gcOpenNote(f), 'btn small') : h('span', { class: 'ms', style: 'font-size:11px;color:var(--sub)', text: 'PDF·사진만 가능' }));
+  const groupView = [...groups.entries()].map(([course,files]) => { const nf=files.filter(f=>!seen.has(f.id)&&f.openable); return h('div',{class:'sec',style:'padding:10px 14px 4px;margin-bottom:0'},
+    h('div',{class:'r'},h('h3',{text:course}),nf.length?btn('이 과목 '+nf.length+'개 가져오기',async()=>{await gcImportAll(nf);gcMarkSeen(d.files);drawGc();},'btn small'):null), files.map(row)); });
   fill(body,
     h('div', { class: 'wform' },
       fresh.length ? btn('새 학습지 ' + fresh.length + '개 모두 노트로 가져오기', async () => { await gcImportAll(fresh); gcMarkSeen(d.files); drawGc(); }, 'btn') : null,
       btn('목록 새로고침', async () => { await api('GET', '/api/gc/files?fresh=1'); drawGc(); }, 'btn ghost')),
-    d.files.length ? d.files.map(row) : msg('클래스룸에서 찾은 첨부 파일이 없어요.'),
+    d.files.length ? groupView : msg('클래스룸에서 찾은 첨부 파일이 없어요.'),
     h('div', { style: 'text-align:center;padding:14px' }, unlink));
   gcMarkSeen(d.files);
 }
@@ -2071,8 +2154,8 @@ async function gcCheckNew() {
   try {
     const r = await fetch(API + '/api/gc/files', { headers: { 'x-uid': uid } });
     if (!r.ok) return;
-    const d = await r.json(), seen = gcSeenSet(), n = d.files.filter((f) => !seen.has(f.id) && f.openable).length;
-    if (n && seen.size) toast('클래스룸에 새 학습지 ' + n + '개가 있어요');
+    const d = await r.json(), seen = gcSeenSet(), fresh = d.files.filter((f) => !seen.has(f.id) && f.openable), n = fresh.length;
+    if (n && seen.size) { const by={}; fresh.forEach(f=>by[f.course]=(by[f.course]||0)+1); toast('새 학습지 '+n+'개 · '+Object.entries(by).map(([k,v])=>k+' '+v+'개').join(', ')); }
     else if (!seen.size) gcMarkSeen(d.files); // 처음 연결했을 때는 알리지 않고 기준만 저장
   } catch { /* 오프라인이면 건너뛰어요 */ }
 }
