@@ -303,148 +303,67 @@ async function handleSchool(res, url) {
   }
 }
 
-// ───────── 구글 클래스룸 (읽기 전용) ─────────
-// 학생이 구글 계정을 연결하면 클래스룸 학습지(PDF·사진·구글 문서)를 앱으로 가져와요.
-// 필요한 환경변수: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, PUBLIC_URL (예: https://내서버.up.railway.app)
-const G_ID = process.env.GOOGLE_CLIENT_ID || '', G_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
-const G_AUTH = process.env.GOOGLE_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';
-const G_TOKEN = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
-const G_REVOKE = process.env.GOOGLE_REVOKE_URL || 'https://oauth2.googleapis.com/revoke';
-const G_CLASS = process.env.CLASSROOM_URL || 'https://classroom.googleapis.com/v1/';
-const G_DRIVE = process.env.DRIVE_URL || 'https://www.googleapis.com/drive/v3/';
-const G_SCOPES = ['https://www.googleapis.com/auth/classroom.courses.readonly', 'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
-  'https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly', 'https://www.googleapis.com/auth/classroom.announcements.readonly',
-  'https://www.googleapis.com/auth/drive.readonly'].join(' ');
-const MAX_GFILE = 40 * 1024 * 1024;
-const gcOn = () => !!(G_ID && G_SECRET && PUBLIC_URL);
-const gcStates = new Map(), gcAccessCache = new Map(), gcListCache = new Map();
-const gcPage = (msg) => '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>금베</title>' +
-  '<body style="font-family:sans-serif;text-align:center;padding:60px 24px;line-height:1.7"><h2>' + msg + '</h2><p>이 창을 닫고 앱으로 돌아가 주세요.</p></body>';
-async function gcToken(params) {
-  const r = await fetch(G_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: G_ID, client_secret: G_SECRET, ...params }) });
-  return { ok: r.ok, d: await r.json().catch(() => ({})) };
-}
-async function gcCallback(res, url) {
-  const send = (st, msg) => { res.writeHead(st, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(gcPage(msg)); };
-  const st = gcStates.get(url.searchParams.get('state') || '');
-  gcStates.delete(url.searchParams.get('state') || '');
-  if (!st || st.exp < Date.now()) return send(400, '연결 시간이 지났어요.');
-  if (url.searchParams.get('error') || !url.searchParams.get('code')) return send(400, '연결하지 않았어요.');
-  try {
-    const { ok, d } = await gcToken({ code: url.searchParams.get('code'), redirect_uri: PUBLIC_URL + '/api/gc/callback', grant_type: 'authorization_code' });
-    if (!ok || !d.refresh_token) return send(400, '연결에 실패했어요. 다시 시도해 주세요.');
-    db.gc[st.uid] = d.refresh_token; gcAccessCache.delete(st.uid); gcListCache.delete(st.uid); save();
-    send(200, '구글 클래스룸이 연결됐어요!');
-  } catch (e) { console.error('[gc]', e && e.message); send(502, '구글에 연결하지 못했어요.'); }
-}
-async function gcAccess(uid) {
-  const c = gcAccessCache.get(uid);
-  if (c && c.exp > Date.now() + 60e3) return c.access;
-  const refresh = db.gc[uid];
-  if (!refresh) return null;
-  const { ok, d } = await gcToken({ refresh_token: refresh, grant_type: 'refresh_token' });
-  if (!ok || !d.access_token) { if (d.error === 'invalid_grant') { delete db.gc[uid]; save(); } return null; }
-  gcAccessCache.set(uid, { access: d.access_token, exp: Date.now() + (d.expires_in || 3600) * 1000 });
-  return d.access_token;
-}
-async function gcGet(token, url, ms = 15000) {
-  const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), ms);
-  try { return await fetch(url, { headers: { Authorization: 'Bearer ' + token }, signal: ctrl.signal }); } finally { clearTimeout(t); }
-}
-const NOT_OPENABLE = /\.(docx?|pptx?|xlsx?|hwp|hwpx|zip|txt|csv|mp3|mp4|mov)$/i;
-async function gcList(token) {
-  const cr = await gcGet(token, G_CLASS + 'courses?courseStates=ACTIVE&studentId=me&pageSize=20');
-  if (!cr.ok) { const e = new Error('courses ' + cr.status); e.status = cr.status; throw e; }
-  const courses = ((await cr.json()).courses || []).slice(0, 15), out = new Map();
-  await Promise.all(courses.map(async (c) => {
-    for (const [kind, ep, key] of [['work', 'courseWork', 'courseWork'], ['material', 'courseWorkMaterials', 'courseWorkMaterial'], ['post', 'announcements', 'announcements']]) {
-      let d = {};
-      try { const r = await gcGet(token, G_CLASS + 'courses/' + encodeURIComponent(c.id) + '/' + ep + '?pageSize=30'); if (r.ok) d = await r.json(); } catch { /* 이 항목만 건너뛰어요 */ }
-      for (const it of d[key] || []) {
-        for (const m of it.materials || []) {
-          const f = m.driveFile && m.driveFile.driveFile;
-          if (!f || !/^[\w-]{3,}$/.test(f.id || '')) continue;
-          const title = clip(f.title || '이름 없는 파일', 80);
-          if (!out.has(f.id)) out.set(f.id, { id: f.id, title, course: clip(c.name, 40), kind, from: clip(it.title || it.text || '', 40), ts: Date.parse(it.updateTime || it.creationTime) || 0, openable: !NOT_OPENABLE.test(title) });
-        }
-      }
-    }
-  }));
-  return [...out.values()].sort((a, b) => b.ts - a.ts).slice(0, 100);
-}
-async function gcFile(res, token, id) {
-  const mr = await gcGet(token, G_DRIVE + 'files/' + encodeURIComponent(id) + '?fields=name,mimeType,size&supportsAllDrives=true');
-  if (!mr.ok) return json(res, mr.status === 404 || mr.status === 403 ? 404 : 502, { error: '파일을 찾을 수 없거나 열 권한이 없어요.' });
-  const meta = await mr.json(), mt = String(meta.mimeType || '');
-  const google = mt.startsWith('application/vnd.google-apps.');
-  if (google ? !/\.(document|presentation|spreadsheet|drawing)$/.test(mt) : !(mt === 'application/pdf' || mt.startsWith('image/'))) {
-    return json(res, 415, { error: 'PDF·사진·구글 문서만 노트로 열 수 있어요.' });
-  }
-  if (!google && +meta.size > MAX_GFILE) return json(res, 413, { error: '파일이 너무 커요 (40MB까지).' });
-  const fr = await gcGet(token, google ? G_DRIVE + 'files/' + encodeURIComponent(id) + '/export?mimeType=application%2Fpdf' : G_DRIVE + 'files/' + encodeURIComponent(id) + '?alt=media&supportsAllDrives=true', 60000);
-  if (!fr.ok) return json(res, 502, { error: '파일을 받지 못했어요.' });
-  const buf = Buffer.from(await fr.arrayBuffer());
-  if (buf.length > MAX_GFILE) return json(res, 413, { error: '파일이 너무 커요 (40MB까지).' });
-  let name = String(meta.name || 'file'); if (google && !/\.pdf$/i.test(name)) name += '.pdf';
-  res.writeHead(200, { 'Content-Type': google ? 'application/pdf' : mt, 'Content-Length': buf.length, 'Cache-Control': 'private, no-store', 'X-File-Name': encodeURIComponent(name) });
-  res.end(buf);
-}
-async function handleGc(req, res, url, uid) {
-  const p = url.pathname;
-  if (req.method === 'GET' && p === '/api/gc/status') return json(res, 200, { configured: gcOn(), linked: !!db.gc[uid] });
-  if (!gcOn()) return json(res, 503, { error: '서버에 구글 연동 설정이 아직 없어요.' });
-  if (req.method === 'GET' && p === '/api/gc/auth') {
-    for (const [k, v] of gcStates) if (v.exp < Date.now()) gcStates.delete(k);
-    if (gcStates.size > 500) return json(res, 429, { error: '잠시 후에 다시 시도해 주세요.' });
-    const state = rid(16); gcStates.set(state, { uid, exp: Date.now() + 10 * 60e3 });
-    const q = new URLSearchParams({ client_id: G_ID, redirect_uri: PUBLIC_URL + '/api/gc/callback', response_type: 'code', scope: G_SCOPES, access_type: 'offline', prompt: 'consent', state });
-    return json(res, 200, { url: G_AUTH + '?' + q });
-  }
-  if (req.method === 'POST' && p === '/api/gc/unlink') {
-    const refresh = db.gc[uid];
-    delete db.gc[uid]; gcAccessCache.delete(uid); gcListCache.delete(uid); save();
-    if (refresh) fetch(G_REVOKE + '?token=' + encodeURIComponent(refresh), { method: 'POST' }).catch(() => {});
-    return json(res, 200, { ok: true });
-  }
-  if (req.method === 'GET' && (p === '/api/gc/files' || p === '/api/gc/file')) {
-    const need = { error: '구글 계정을 먼저 연결해 주세요.', relink: true };
-    if (!db.gc[uid]) return json(res, 401, need);
-    if (tooFast(uid, 'gc' + p, 700)) return json(res, 429, { error: '너무 빨라요. 잠시 후에 다시 해 주세요.' });
-    try {
-      const token = await gcAccess(uid);
-      if (!token) return json(res, 401, need);
-      if (p === '/api/gc/file') {
-        const id = url.searchParams.get('id') || '';
-        if (!/^[\w-]{3,}$/.test(id)) return json(res, 400, { error: '잘못된 요청이에요.' });
-        return await gcFile(res, token, id);
-      }
-      const hit = gcListCache.get(uid);
-      if (hit && Date.now() - hit.t < 60e3 && !url.searchParams.get('fresh')) return json(res, 200, { files: hit.files });
-      const files = await gcList(token);
-      gcListCache.set(uid, { t: Date.now(), files });
-      return json(res, 200, { files });
-    } catch (e) {
-      console.error('[gc]', p, e && e.message);
-      if (e && (e.status === 401 || e.status === 403)) return json(res, 403, { error: '클래스룸을 볼 수 있는 권한이 없어요. 학교 계정 설정을 확인해 주세요.' });
-      return json(res, 502, { error: '클래스룸에서 가져오지 못했어요.' });
-    }
-  }
-  return json(res, 404, { error: 'not found' });
-}
-
-// ───────── API ─────────
 async function handleApi(req, res, url) {
   const p = url.pathname;
-  if (req.method === 'GET' && p === '/api/events') return handleEvents(req, res, url);
-  if (req.method === 'GET' && p === '/api/gc/callback') return gcCallback(res, url); // 구글이 되돌려 보내는 주소 (x-uid 없음)
   const uid = String(req.headers['x-uid'] || '');
   if (!isUid(uid)) return json(res, 400, { error: '잘못된 요청이에요. 앱을 새로고침해 주세요.' });
-  const banMsg = { error: '이 기기는 글쓰기가 제한돼 있어요.' };
-
-  if (req.method === 'POST' && p === '/api/upload') return handleUpload(req, res, uid);
-  if (p.startsWith('/api/gc/')) return handleGc(req, res, url, uid);
+// ───────── 구글 드라이브 공유 폴더 학습지 (API/OAuth 불필요) ─────────
+// 사용자가 "링크가 있는 모든 사용자"로 공유한 금베 폴더를 읽습니다.
+const gdShares = new Map();
+const SHARE_MAX = 20 * 1024 * 1024;
+function driveFolderId(link) {
+  const m=String(link||'').match(/\/folders\/([A-Za-z0-9_-]+)/); return m ? m[1] : '';
+}
+function cleanDriveName(s){return String(s||'').replace(/\\u003c/g,'<').replace(/\\u003e/g,'>').replace(/\\u0026/g,'&').replace(/\\"/g,'"').trim();}
+async function publicDriveHtml(id){
+  const u='https://drive.google.com/drive/folders/'+encodeURIComponent(id)+'?usp=sharing';
+  const r=await fetch(u,{redirect:'follow',headers:{'User-Agent':'Mozilla/5.0'}});
+  if(!r.ok) throw new Error('공유 폴더를 열 수 없어요.');
+  return await r.text();
+}
+function parseDriveItems(html){
+  const out=new Map();
+  // 공개 Drive 폴더 페이지에 포함되는 file/folder ID와 표시명 패턴을 최대한 보수적으로 읽습니다.
+  const re=/([\"'])([A-Za-z0-9_-]{20,})(?:\1)\s*[,;:]\s*\1([^\"']{1,180})\1/g; let m;
+  while((m=re.exec(html))){const id=m[2],name=cleanDriveName(m[3]); if(name && !/^[A-Za-z0-9_-]{20,}$/.test(name)) out.set(id,{id,name});}
+  // fallback: file id followed by HTML escaped name
+  const re2=/([A-Za-z0-9_-]{20,})[^]{0,250}?aria-label[=:][\"']([^\"']{1,180})/g;
+  while((m=re2.exec(html))){if(!out.has(m[1]))out.set(m[1],{id:m[1],name:cleanDriveName(m[2])});}
+  return [...out.values()].filter(x=>x.name && !/^Google Drive$/.test(x.name));
+}
+async function gdListShare(link){
+  const root=driveFolderId(link); if(!root) throw new Error('Google Drive 폴더 링크 형식이 아니에요.');
+  const html=await publicDriveHtml(root), items=parseDriveItems(html);
+  return {root,items};
+}
+async function gdFetchPublic(id){
+  if(!/^[A-Za-z0-9_-]{20,}$/.test(id)) throw new Error('잘못된 파일이에요.');
+  let r=await fetch('https://drive.google.com/uc?export=download&id='+encodeURIComponent(id),{redirect:'follow',headers:{'User-Agent':'Mozilla/5.0'}});
+  if(!r.ok) throw new Error('파일을 받을 수 없어요.');
+  const ct=r.headers.get('content-type')||'';
+  const buf=Buffer.from(await r.arrayBuffer());
+  if(buf.length>SHARE_MAX) throw new Error('파일이 너무 커요 (20MB까지).');
+  return {buf,ct};
+}
+async function handleGd(req,res,url,uid){
+  const p=url.pathname; const key=String(uid||'');
+  if(req.method==='GET'&&p==='/api/gd/status') return json(res,200,{configured:true,linked:!!gdShares.get(key)});
+  if(req.method==='POST'&&p==='/api/gd/link'){
+    let body={}; try{body=JSON.parse(await readBody(req))}catch{}
+    const link=String(body.link||'').trim(); if(!driveFolderId(link)) return json(res,400,{error:'Google Drive 폴더 공유 링크를 입력해 주세요.'});
+    try{await gdListShare(link); gdShares.set(key,link); return json(res,200,{ok:true});}catch(e){return json(res,400,{error:e.message||'공유 폴더를 확인하지 못했어요.'});}
+  }
+  if(req.method==='POST'&&p==='/api/gd/unlink'){gdShares.delete(key);return json(res,200,{ok:true});}
+  if(req.method==='GET'&&p==='/api/gd/files'){
+    const link=gdShares.get(key); if(!link)return json(res,401,{error:'공유 폴더를 먼저 등록해 주세요.',relink:true});
+    try{return json(res,200,await gdListShare(link));}catch(e){return json(res,502,{error:e.message||'공유 폴더를 읽지 못했어요.'});}
+  }
+  if(req.method==='GET'&&p==='/api/gd/file'){
+    try{const id=url.searchParams.get('id')||'';const d=await gdFetchPublic(id);res.writeHead(200,{'Content-Type':d.ct||'application/octet-stream','Content-Length':d.buf.length,'Cache-Control':'private,no-store'});return res.end(d.buf);}catch(e){return json(res,400,{error:e.message||'파일을 받지 못했어요.'});}
+  }
+  return json(res,404,{error:'not found'});
+}
+  if (p.startsWith('/api/gd/')) return handleGd(req, res, url, uid);
 
   // 사전
   if (req.method === 'GET' && p === '/api/dict') return handleDict(res, url);
@@ -702,6 +621,7 @@ async function handleApi(req, res, url) {
   }
   return json(res, 404, { error: 'not found' });
 }
+
 
 // ───────── 서버 ─────────
 const server = http.createServer((req, res) => {
