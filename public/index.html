@@ -202,6 +202,9 @@
   .ptools { display: flex; gap: 4px; align-items: center; padding: 5px 8px; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--card); flex: none; scrollbar-width: none; }
   .ptools::-webkit-scrollbar { display: none; }
   .ptools .icon { flex: none; padding: 7px; }
+  .ptools .ptool { gap: 4px; min-width: 42px; justify-content: center; }
+  .ptools .ptoolLabel { font-size: 11px; line-height: 1; white-space: nowrap; }
+  .ptools .ptool.on .i { stroke-width: 2.5; }
   .ptools .icon.on { background: var(--accent); color: var(--on-accent); }
   .ptools .icon:disabled { opacity: .3; }
   .ptools .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; flex: none; }
@@ -514,6 +517,10 @@ const ICONS = {
   check: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   pen: '<path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="m14 7 3 3"/>',
+  pencil: '<path d="m4 20 1.2-4.8L15.8 4.6a2.1 2.1 0 0 1 3 3L8.2 18.8z"/><path d="m13.8 6.6 3.6 3.6"/><path d="M4 20h5"/>',
+  ballpoint: '<path d="M6 18.5 16.7 7.8l2.8 2.8L8.8 21H5z"/><path d="m15.5 9 2.8 2.8"/><path d="M18 5.5 20 7.5"/><path d="m5 21 2-2"/>',
+  fountain: '<path d="m5 19 3.5-9L17 3.5 20.5 7 11 16.5z"/><path d="M8.5 10 14 15.5"/><path d="M5 19l-1 3 3-1"/>',
+  marker: '<path d="m5 19 10-10 4 4L9 23H5z"/><path d="m14 10 4 4"/><path d="M5 19h4"/>',
   hl: '<path d="m9 11 6 6-4 3H6v-3z"/><path d="m13 7 4 4 3-3-4-4z"/>',
   eraser: '<path d="m7 21-4-4a2 2 0 0 1 0-3l10-10a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3l-8 9"/><path d="M7 21h13M8 8l8 8"/>',
   hand: '<path d="M8 12V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2-4a1.5 1.5 0 0 1 2.5-1.5L8 14"/>',
@@ -1830,7 +1837,7 @@ function pnGestMove() {
 pnCv.addEventListener('pointerdown', (e) => {
   if (!PN.editing) return;
   e.preventDefault();
-  if (e.pointerType === 'pen' && !PN.manual && !PN.fingerPan) { PN.fingerPan = true; pnTools(); } // 펜이 감지되면 손가락은 이동·확대 전용(손바닥 방지)
+  if (e.pointerType === 'pen' && !PN.manual && !PN.fingerPan) { PN.fingerPan = true; } // 펜 입력 시 손가락은 이동·확대 전용으로 전환하되 도구 UI는 재생성하지 않음
   if (e.pointerType === 'touch' && PN.cur && PN.cur.pen) return;
   try { pnCv.setPointerCapture(e.pointerId); } catch {}
   const [sx, sy] = pnPos(e);
@@ -1928,10 +1935,10 @@ document.addEventListener('keydown', (e) => {
 function pnTools() {
   const t = PN.tool;
   const b = (icon, label, fn, on, id) => h('button', { class: 'icon' + (on ? ' on' : ''), type: 'button', 'aria-label': label, title: label, id, onclick: fn }, ic(icon));
-  const tool = (name, icon, label) => b(icon, label, () => { PN.tool = name; if (name !== 'sel') PN.sel = null; pnTools(); pnRender(); }, t === name);
+  const tool = (name, icon, label) => h('button', { class: 'icon ptool' + (t === name ? ' on' : ''), type: 'button', 'aria-label': label, title: label, 'data-tool': name, onclick: () => { PN.tool = name; PN.sel = null; pnTools(); pnRender(); } }, ic(icon), h('span', { class: 'ptoolLabel', text: label }));
   const chip = (text, fn) => h('button', { class: 'chip', type: 'button', style: 'flex:none', text, onclick: fn });
   fill($('pTools1'),
-    tool('pen', 'pen', '펜'), tool('pencil', 'pencil', '연필'), tool('ball', 'pen', '볼펜'), tool('fountain', 'pen', '만년필'), tool('marker', 'hl', '마커'), tool('hl', 'hl', '형광펜'), tool('er', 'eraser', '지우개'), tool('sel', 'cursor', '사진 선택·크기 조절'), tool('hand', 'hand', '이동'),
+    tool('pen', 'pen', '펜'), tool('pencil', 'pencil', '연필'), tool('ball', 'ballpoint', '볼펜'), tool('fountain', 'fountain', '만년필'), tool('marker', 'marker', '마커'), tool('hl', 'hl', '형광펜'), tool('er', 'eraser', '지우개'), tool('sel', 'cursor', '사진 선택·크기 조절'), tool('hand', 'hand', '이동'),
     h('span', { class: 'sep' }),
     b('image', '사진 넣기', pnAddPhoto), b('clip', '파일 불러오기 (PDF·사진)', pnAddFile),
     h('span', { class: 'sep' }),
