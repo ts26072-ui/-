@@ -1424,7 +1424,7 @@ const PN = {
   db: null, id: null, isNew: false, title: '', strokes: [], hist: [[]], hi: 0, tool: 'pen', color: '#16181d',
   size: { pen: 3, pencil: 2.2, ball: 2.6, fountain: 3.4, marker: 8, hl: 14, er: 20 }, v: { s: 1, x: 0, y: 0 }, W: 600, H: 900, bg: 'plain',
   imgs: [], sel: null, drag: null, ic: new Map(), fingerPan: false, manual: false, cur: null, ptrs: new Map(), gest: null, pan: null, erased: false,
-  dirty: false, timer: 0, editing: false, cw: 0, ch: 0, dpr: 1,
+  dirty: false, timer: 0, editing: false, cw: 0, ch: 0, dpr: 1, funcDegree: 4, funcScale: 50, autoShape: false,
 };
 const PN_COLORS = ['#16181d', '#6b7280', '#dc2626', '#f97316', '#f59e0b', '#facc15', '#84cc16', '#16a34a', '#0d9488', '#06b6d4', '#2563eb', '#4f46e5', '#9333ea', '#db2777', '#f472b6', '#92400e'];
 const PN_RANGE = { pen: [0.5, 20, 0.5], pencil: [0.5, 10, 0.5], ball: [0.5, 12, 0.5], fountain: [1, 16, 0.5], marker: [3, 28, 1], hl: [6, 48, 1], er: [8, 60, 1] };
@@ -1703,7 +1703,7 @@ function pnRecognizeShape(st) {
 function pnCorrectShape() {
   if (!PN.strokes.length) return toast('보정할 획이 없어요.');
   const i=PN.strokes.length-1, st=PN.strokes[i], out=pnRecognizeShape(st);
-  if (!out) return toast('도형으로 인식하지 못했어요. 원·직선·사각형 등을 크게 한 번에 그려 보세요.');
+  if (!out) return toast('도형으로 인식하지 못했어요. 원·직선·사각형·삼각형·화살표를 한 번에 크게 그려 보세요.');
   PN.strokes=[...PN.strokes.slice(0,i),out]; pnPush(); pnRender(); toast((out.corrected||'도형')+'으로 보정했어요.');
 }
 function pnSolveLinear(A,b) {
@@ -1724,8 +1724,8 @@ function pnCorrectFunction() {
   const longH=candidates.map((st,i)=>({st,i,bb:pnBBox(st.p),len:pnStrokeLength(st.p)})).filter(o=>o.bb.maxX-o.bb.minX>PN.W*0.35&&(o.bb.maxY-o.bb.minY)<24).sort((a,b)=>b.len-a.len)[0];
   const longV=candidates.map((st,i)=>({st,i,bb:pnBBox(st.p),len:pnStrokeLength(st.p)})).filter(o=>o.bb.maxY-o.bb.minY>PN.H*0.35&&(o.bb.maxX-o.bb.minX)<24).sort((a,b)=>b.len-a.len)[0];
   const y0=longH?(longH.bb.minY+longH.bb.maxY)/2:PN.H/2, x0=longV?(longV.bb.minX+longV.bb.maxX)/2:PN.W/2;
-  const degree=Math.max(1,Math.min(4,+(prompt('보정할 함수 차수를 입력하세요.\n1=일차, 2=이차, 3=삼차, 4=사차', '4')||'4')));
-  const scale=Math.max(10,Math.min(500,+(prompt('그래프의 1칸(1단위)을 몇 px로 볼까요?', '50')||'50')));
+  const degree=Math.max(1,Math.min(4, Number(PN.funcDegree) || 4));
+  const scale=Math.max(10,Math.min(500, Number(PN.funcScale) || 50));
   const axisStrokes=new Set([longH?.st,longV?.st].filter(Boolean));
   const graphStrokes=candidates.filter(st=>!axisStrokes.has(st));
   const pts=graphStrokes.flatMap(st=>st.p.map(q=>[q[0],q[1]])).filter(q=>Math.hypot(q[0]-x0,q[1]-y0)>10).map(q=>[(q[0]-x0)/scale,(y0-q[1])/scale]).filter(q=>Math.abs(q[0])<50&&Math.abs(q[1])<100);
@@ -1846,7 +1846,8 @@ function pnUp(e) {
   PN.cur = null;
   if (c.er) { if (PN.erased) pnPush(); PN.erased = false; return; }
   if (e.type === 'pointercancel') { pnRender(); return; }
-  const st = c.st;
+  let st = c.st;
+  if (st.t === 'pen' && PN.autoShape) st = pnRecognizeShape(st) || st;
   if (st.t === 'pen') pnOnPage((x) => pnPenPart(x, st, st.p.length === 1 ? 0 : st.p.length - 1));
   PN.strokes = [...PN.strokes, st]; pnPush();
   if (st.t === 'hl') pnRender();
@@ -1884,7 +1885,11 @@ function pnTools() {
     b('zoomIn', '확대', () => pnZoomAt(PN.cw / 2, PN.ch / 2, PN.v.s * 1.25)),
     b('fit', '화면에 맞추기', pnFit),
     h('span', { class: 'sep' }),
-    chip('도형 보정', pnCorrectShape), chip('함수 보정(1~4차)', pnCorrectFunction),
+    chip('도형 보정', pnCorrectShape),
+    h('label', { class: 'chip', style: 'display:flex;align-items:center;gap:5px' }, '함수', (() => { const s=h('select',{class:'input',style:'width:58px;padding:4px 6px'}); [1,2,3,4].forEach(n=>s.append(h('option',{value:String(n),text:n+'차'}))); s.value=String(PN.funcDegree); s.onchange=()=>{PN.funcDegree=+s.value;}; return s; })()),
+    chip('함수 보정', pnCorrectFunction),
+    h('input', { class:'input', type:'number', min:'10', max:'500', step:'5', value:String(PN.funcScale), title:'그래프 1단위의 픽셀 수', 'aria-label':'그래프 한 칸 픽셀 수', style:'width:74px;padding:6px' , oninput:(e)=>{PN.funcScale=Math.max(10,Math.min(500,+e.target.value||50));}}),
+    h('label',{class:'chip',style:'display:flex;align-items:center;gap:5px'},h('input',{type:'checkbox',checked:PN.autoShape,onchange:(e)=>{PN.autoShape=e.target.checked;}}),'도형 자동'),
     h('span', { class: 'sep' }),
     chip('배경: ' + PN_BG[PN.bg], () => { PN.bg = PN.bg === 'plain' ? 'lined' : PN.bg === 'lined' ? 'grid' : 'plain'; pnLater(); pnTools(); pnRender(); }),
     chip('페이지 늘리기', () => { if (PN.H >= 20000) return toast('더 늘릴 수 없어요.'); PN.H += 600; pnLater(); pnSetView(); toast('페이지를 아래로 늘렸어요.'); }),
@@ -2139,14 +2144,13 @@ async function drawGc() {
     h('div', { class: 'pfm' }, h('b', { text: f.title }), h('span', { text: (f.from || '') + (f.ts ? ' · ' + new Date(f.ts).toISOString().slice(5, 10).replace('-', '.') : '') })),
     f.openable ? btn('필기로 열기', () => gcOpenNote(f), 'btn small') : h('span', { class: 'ms', style: 'font-size:11px;color:var(--sub)', text: 'PDF·사진만 가능' }));
   const groupView = [...groups.entries()].map(([course,files]) => { const nf=files.filter(f=>!seen.has(f.id)&&f.openable); return h('div',{class:'sec',style:'padding:10px 14px 4px;margin-bottom:0'},
-    h('div',{class:'r'},h('h3',{text:course}),nf.length?btn('이 과목 '+nf.length+'개 가져오기',async()=>{await gcImportAll(nf);gcMarkSeen(d.files);drawGc();},'btn small'):null), files.map(row)); });
+    h('div',{class:'r'},h('h3',{text:course}),nf.length?btn('이 과목 '+nf.length+'개 가져오기',async()=>{await gcImportAll(nf);gcMarkSeen(nf);drawGc();},'btn small'):null), files.map(row)); });
   fill(body,
     h('div', { class: 'wform' },
-      fresh.length ? btn('새 학습지 ' + fresh.length + '개 모두 노트로 가져오기', async () => { await gcImportAll(fresh); gcMarkSeen(d.files); drawGc(); }, 'btn') : null,
+      fresh.length ? btn('새 학습지 ' + fresh.length + '개 모두 노트로 가져오기', async () => { await gcImportAll(fresh); gcMarkSeen(fresh); drawGc(); }, 'btn') : null,
       btn('목록 새로고침', async () => { await api('GET', '/api/gc/files?fresh=1'); drawGc(); }, 'btn ghost')),
     d.files.length ? groupView : msg('클래스룸에서 찾은 첨부 파일이 없어요.'),
     h('div', { style: 'text-align:center;padding:14px' }, unlink));
-  gcMarkSeen(d.files);
 }
 // 앱을 열 때 새 학습지가 있는지 조용히 확인
 async function gcCheckNew() {
