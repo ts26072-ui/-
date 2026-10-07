@@ -3,7 +3,7 @@
   "appName": "금베",
   "webDir": "public",
   "server": {
-    "url": "https://clever-charm-production-0a3f.up.railway.app/",
+    "url": "https://carefree-cooperation-production-1f06.up.railway.app",
     "cleartext": false
   }
 }
