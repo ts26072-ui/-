@@ -3,7 +3,7 @@
   "appName": "익명방",
   "webDir": "public",
   "server": {
-    "url": "https://clever-charm-production-0a3f.up.railway.app",
+    "url": "https://YOUR-SERVER-ADDRESS",
     "cleartext": false
   }
 }
