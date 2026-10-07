@@ -3,7 +3,7 @@
   "appName": "금베",
   "webDir": "public",
   "server": {
-    "url": "https://YOUR-SERVER-ADDRESS",
+    "url": "https://clever-charm-production-0a3f.up.railway.app/",
     "cleartext": false
   }
 }
