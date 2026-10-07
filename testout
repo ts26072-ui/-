@@ -1,0 +1,35 @@
+FAIL 입장 시 hello 수신, 관리자 기능 켜짐
+PASS 다른 사람에게 메시지 전달
+PASS 작성자 정보(uid) 노출 없음
+PASS 도배 제한(429)
+PASS 2명 신고로는 안 가려짐
+PASS 3명 신고 시 모두에게 가려짐
+PASS 지원 안 하는 형식 거부(415)
+PASS 영상 업로드
+PASS Range 요청 206 (영상 재생에 필요)
+PASS 쇼츠에 사진은 거부
+PASS 쇼츠 올리기
+PASS 쇼츠 목록에 표시
+PASS 쇼츠 좋아요/취소
+PASS 글쓰기
+PASS 글 목록(번호·사진 표시)
+PASS 글 상세·댓글
+PASS 추천 3개면 개념글
+PASS 1:1 요청
+PASS 자기 자신에게는 요청 불가
+PASS 상대에게 요청 알림
+PASS 받는 쪽은 대기 상태
+PASS 수락 후 대화·안읽음 표시
+PASS 읽음 처리
+PASS 제3자는 대화 접근 불가
+PASS 관리자 키 틀리면 거부
+FAIL 관리자 확인(한글·공백 키)
+/tmp/gumfix/test.js:171
+  check('1:1 신고 내용 전달', reps.length === 1 && reps[0].messages[0].text === '안녕하세요');
+                             ^
+
+TypeError: Cannot read properties of undefined (reading 'length')
+    at /tmp/gumfix/test.js:171:30
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+
+Node.js v22.16.0

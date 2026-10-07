@@ -1,0 +1,12 @@
+'use strict';
+const fs = require('fs');
+const assert = require('assert');
+const html = fs.readFileSync(require('path').join(__dirname, 'public', 'index.html'), 'utf8');
+assert(html.includes("funcDegree: 4"), '4차 함수 기본 차수가 없음');
+assert(html.includes("[1,2,3,4]"), '함수 차수 선택기가 없음');
+assert(html.includes("pnPolyFit"), '다항식 회귀가 없음');
+assert(html.includes("degree,coef:fit.coef"), '회귀 결과 저장이 없음');
+assert(html.includes("도형 자동"), '도형 자동 보정 토글이 없음');
+assert(html.includes("course||'기타'"), 'Classroom 과목 분류가 없음');
+assert(html.includes("gcMarkSeen(fresh)"), '가져온 자료만 확인 처리해야 함');
+console.log('feature-test: PASS');
