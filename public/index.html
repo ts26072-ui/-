@@ -1896,9 +1896,10 @@ pnCv.addEventListener('pointermove', (e) => {
     const st = c.st, last = st.p[st.p.length - 1];
     if (Math.hypot(wx - last[0], wy - last[1]) * PN.v.s < 1.2) continue;
     st.p.push([r1(wx), r1(wy), pnPress(ev, false)]);
-    if (st.t === 'pen' && st.p.length >= 2) pnOnPage((x) => pnPenPart(x, st, st.p.length - 2));
+    // 모든 필기 도구는 펜과 동일하게 입력 즉시 마지막 선분을 렌더링합니다.
+    // 도구별 차이는 pnPenPart의 투명도/두께 처리만 담당합니다.
+    if (st.p.length >= 2) pnOnPage((x) => pnPenPart(x, st, st.p.length - 2));
   }
-  if (!c.er && c.st.t === 'hl') pnRender();
 });
 function pnUp(e) {
   const q = PN.ptrs.get(e.pointerId); if (!q) return;
@@ -1912,9 +1913,9 @@ function pnUp(e) {
   if (e.type === 'pointercancel') { pnRender(); return; }
   let st = c.st;
   if (st.t === 'pen' && PN.autoShape) st = pnRecognizeShape(st) || st;
-  if (st.t === 'pen') pnOnPage((x) => pnPenPart(x, st, st.p.length === 1 ? 0 : st.p.length - 1));
+  // 마지막 점까지 모든 필기 도구를 동일한 방식으로 마무리합니다.
+  pnOnPage((x) => pnPenPart(x, st, st.p.length === 1 ? 0 : st.p.length - 1));
   PN.strokes = [...PN.strokes, st]; pnPush();
-  if (st.t === 'hl') pnRender();
 }
 pnCv.addEventListener('pointerup', pnUp);
 pnCv.addEventListener('pointercancel', pnUp);
