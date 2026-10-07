@@ -1683,21 +1683,59 @@ function pnShapeStroke(type, a, b, c, d, base) {
   if (type === 'arrow') { const ang=Math.atan2(b[1]-a[1],b[0]-a[0]), len=Math.max(10,Math.min(28,pnDist(a,b)*0.15)); const l=[b[0]-len*Math.cos(ang-Math.PI/6),b[1]-len*Math.sin(ang-Math.PI/6)], r=[b[0]-len*Math.cos(ang+Math.PI/6),b[1]-len*Math.sin(ang+Math.PI/6)]; [a,b,l,b,r].forEach(q=>push(q[0],q[1])); }
   return { ...base, t:'pen', p:pts, corrected:type };
 }
+function pnSimplify(p, tol) {
+  if (p.length <= 2) return p.slice();
+  const a=p[0], b=p[p.length-1]; let md=-1, mi=-1;
+  for(let i=1;i<p.length-1;i++){const d=pnSegDist(p[i][0],p[i][1],a,b);if(d>md){md=d;mi=i;}}
+  if(md>tol){const l=pnSimplify(p.slice(0,mi+1),tol),r=pnSimplify(p.slice(mi),tol);return l.slice(0,-1).concat(r);}
+  return [a,b];
+}
+function pnAngle(a,b,c){
+  const ux=a[0]-b[0],uy=a[1]-b[1],vx=c[0]-b[0],vy=c[1]-b[1];
+  const den=Math.hypot(ux,uy)*Math.hypot(vx,vy)||1;
+  return Math.acos(Math.max(-1,Math.min(1,(ux*vx+uy*vy)/den)));
+}
+function pnClosedCorners(p){
+  const bb=pnBBox(p), scale=Math.max(bb.maxX-bb.minX,bb.maxY-bb.minY), tol=Math.max(5,scale*.035);
+  let q=pnSimplify(p,tol);
+  if(pnDist(q[0],q[q.length-1])>scale*.12) q.push(q[0]);
+  if(q.length>5){
+    // 너무 촘촘한 꼭짓점은 가까운 점을 합칩니다.
+    const z=[q[0]]; for(let i=1;i<q.length;i++) if(pnDist(q[i],z[z.length-1])>scale*.08||i===q.length-1) z.push(q[i]); q=z;
+  }
+  return q;
+}
 function pnRecognizeShape(st) {
   if (!st || !st.p || st.p.length < 3) return null;
-  const p=st.p, bb=pnBBox(p), w=bb.maxX-bb.minX, h=bb.maxY-bb.minY, close=pnDist(p[0],p[p.length-1]) <= Math.max(18, Math.min(w,h)*0.22), len=pnStrokeLength(p), direct=pnDist(p[0],p[p.length-1]), straight=direct/Math.max(1,len);
-  if (straight > 0.965 && w > 25 && h < w*0.25) return pnShapeStroke('line',p[0],p[p.length-1],null,null,st);
-  if (close && w > 25 && h > 25) {
-    const ratio=w/h;
-    if (ratio > 0.65 && ratio < 1.5) return pnShapeStroke('circle',[bb.minX,bb.minY],[bb.maxX,bb.maxY],null,null,st);
-    const corners=[[bb.minX,bb.minY],[bb.maxX,bb.minY],[bb.maxX,bb.maxY],[bb.minX,bb.maxY]];
-    return pnShapeStroke('rect',corners[0],corners[2],null,null,st);
+  const p=st.p, bb=pnBBox(p), w=bb.maxX-bb.minX, h=bb.maxY-bb.minY;
+  const scale=Math.max(w,h), close=pnDist(p[0],p[p.length-1]) <= Math.max(25,scale*.16), len=pnStrokeLength(p), direct=pnDist(p[0],p[p.length-1]);
+  if (w < 25 && h < 25) return null;
+  if (!close && direct/Math.max(1,len) > .97 && Math.max(w,h)>35) return pnShapeStroke('line',p[0],p[p.length-1],null,null,st);
+  if (!close) return null;
+  const corners=pnClosedCorners(p);
+  const core=corners.slice(0,-1);
+  if(core.length===3){
+    return pnShapeStroke('triangle',core[0],core[1],core[2],null,st);
   }
-  if (p.length >= 4) {
-    const start=p[0], end=p[p.length-1], d=pnDist(start,end);
-    const mid=p[Math.floor(p.length/2)], side=pnDist(start,mid)+pnDist(mid,end);
-    if (side/d > 1.15 && side/d < 3.5 && w>25 && h>25) return pnShapeStroke('arrow',start,end,null,null,st);
+  if(core.length===4){
+    const ang=core.map((_,i)=>pnAngle(core[(i+3)%4],core[i],core[(i+1)%4]));
+    const nearRight=ang.every(a=>Math.abs(a-Math.PI/2)<.38);
+    const sides=core.map((v,i)=>pnDist(v,core[(i+1)%4]));
+    const oppRatio=Math.max(sides[0],sides[2])/Math.max(1,Math.min(sides[0],sides[2]));
+    const oppRatio2=Math.max(sides[1],sides[3])/Math.max(1,Math.min(sides[1],sides[3]));
+    if(nearRight && oppRatio<1.65 && oppRatio2<1.65) return pnShapeStroke('rect',core[0],core[2],null,null,st);
   }
+  // 원/타원: 중심까지 거리의 변동이 작고 닫힌 획
+  const cx=(bb.minX+bb.maxX)/2,cy=(bb.minY+bb.maxY)/2,rx=Math.max(1,w/2),ry=Math.max(1,h/2);
+  const radial=p.map(q=>Math.hypot((q[0]-cx)/rx,(q[1]-cy)/ry));
+  const rm=radial.reduce((a,b)=>a+b,0)/radial.length, rv=Math.sqrt(radial.reduce((a,b)=>a+(b-rm)**2,0)/radial.length);
+  if(rv<.14 && w/h>.45 && w/h<2.2) return pnShapeStroke('circle',[bb.minX,bb.minY],[bb.maxX,bb.maxY],null,null,st);
+  // 사각형을 약간 둥글게 그린 경우: bounding box와 직선성으로 보정
+  if(core.length>=4 && core.length<=6){
+    const sideStraight=core.every((v,i)=>pnDist(v,core[(i+1)%core.length])>scale*.12);
+    if(sideStraight) return pnShapeStroke('rect',[bb.minX,bb.minY],[bb.maxX,bb.maxY],null,null,st);
+  }
+  // 마지막 수단: 길게 돌아온 획은 화살표가 아닌 닫힌 도형으로 우선 처리하지 않습니다.
   return null;
 }
 function pnCorrectShape() {
@@ -2045,9 +2083,9 @@ function pfSub() {
 }
 function drawPerf() {
   pfLoad();
-  fill($('perfTabs'), [['sched', '수행평가 일정'], ['crit', '과목별 평가기준'], ['gc', '클래스룸 학습지']].map(([k, t]) =>
+  fill($('perfTabs'), [['sched', '수행평가 일정'], ['crit', '과목별 평가기준'], ['gd', 'Google Drive 학습지']].map(([k, t]) =>
     h('button', { class: 'chip' + (PF.view === k ? ' on' : ''), type: 'button', text: t, onclick: () => { PF.view = k; drawPerf(); } })));
-  if (PF.view === 'sched') drawPerfSched(); else if (PF.view === 'crit') drawPerfCrit(); else drawGc();
+  if (PF.view === 'sched') drawPerfSched(); else if (PF.view === 'crit') drawPerfCrit(); else drawGd();
 }
 function drawPerfSched() {
   const subj = h('input', { class: 'input', placeholder: '과목 (예: 수학)', maxlength: '20', list: 'pfSubs' });
@@ -2095,75 +2133,24 @@ function drawPerfCrit() {
 }
 
 
-// ───────── 구글 클래스룸 학습지 ─────────
-const gcSeenSet = () => { try { return new Set(JSON.parse(LS.get('gcSeen') || '[]')); } catch { return new Set(); } };
-const gcMarkSeen = (files) => LS.set('gcSeen', JSON.stringify(files.map((f) => f.id).slice(0, 300)));
-async function gcFetchFile(f) {
-  const r = await fetch(API + '/api/gc/file?id=' + encodeURIComponent(f.id), { headers: { 'x-uid': uid } });
-  if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '받지 못했어요.'); }
-  const blob = await r.blob(), name = decodeURIComponent(r.headers.get('X-File-Name') || f.title);
-  return new File([blob], name, { type: blob.type });
+// ───────── Google Drive 공유 폴더 학습지 ─────────
+const gdSeenSet=()=>{try{return new Set(JSON.parse(LS.get('gdSeen')||'[]'));}catch{return new Set();}};
+const gdMarkSeen=(files)=>LS.set('gdSeen',JSON.stringify([...gdSeenSet(),...files.map(f=>f.id)].slice(-500)));
+async function gdFetchFile(f){const r=await fetch(API+'/api/gd/file?id='+encodeURIComponent(f.id),{headers:{'x-uid':uid}});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||'받지 못했어요.');}const blob=await r.blob();return new File([blob],f.name||f.title||'학습지', {type:blob.type||'application/octet-stream'});}
+async function gdOpenNote(f){toast('받는 중…');try{const file=await gdFetchFile(f);showTab('pnote');await pnOpen(null);await pnImport(file);gdMarkSeen([f]);}catch(e){toast(e.message||'받지 못했어요.');}}
+async function gdImportAll(list){let ok=0;for(let i=0;i<list.length;i++){toast('가져오는 중 '+(i+1)+'/'+list.length);try{const file=await gdFetchFile(list[i]);await pnOpen(null);await pnImport(file);await pnClose();ok++;}catch{}}gdMarkSeen(list);PN.editing=false;toast(ok+'개를 내 필기 노트로 가져왔어요.');}
+async function drawGd(){
+ const body=$('perfBody'); fill(body,msg('공유 폴더 불러오는 중…')); const st=await api('GET','/api/gd/status'); if(PF.view!=='gd')return;
+ if(!st){fill(body,msg('서버에 연결할 수 없어요.'));return;}
+ if(!st.linked){
+  const input=h('input',{id:'gdShareInput',class:'inp',placeholder:'https://drive.google.com/drive/folders/...'});
+  fill(body,h('div',{class:'sec'},h('h3',{text:'Google Drive 공유 폴더'}),h('p',{text:'Drive의 금베 폴더를 "링크가 있는 모든 사용자 · 뷰어"로 공유한 뒤 링크를 넣어 주세요.'}),input,h('div',{style:'display:flex;gap:8px;margin-top:12px'},btn('등록',async()=>{const r=await api('POST','/api/gd/link',{link:$("gdShareInput").value});if(r){toast('공유 폴더를 등록했어요.');drawGd();}},'btn'),btn('사용법',()=>alert('Drive → 금베 폴더 우클릭 → 공유 → 일반 액세스에서 링크가 있는 모든 사용자/뷰어 → 링크 복사'),'btn ghost')))); return;
+ }
+ const d=await api('GET','/api/gd/files'); if(PF.view!=='gd')return; if(!d){fill(body,msg('공유 폴더를 읽지 못했어요.'));return;}
+ const items=d.items||[], seen=gdSeenSet(), newItems=items.filter(x=>!seen.has(x.id));
+ const groups=new Map(); items.forEach(x=>{const k=x.folder||'금베';if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x);});
+ fill(body,h('div',{class:'sec'},h('div',{style:'display:flex;justify-content:space-between;align-items:center'},h('b',{text:'금베 공유 폴더'}),btn('연결 해제',async()=>{await api('POST','/api/gd/unlink');LS.del('gdSeen');drawGd();},'lnk adm')),newItems.length?h('p',{class:'ms',text:'새 파일 '+newItems.length+'개'}):h('p',{class:'ms',text:'새 파일 없음'}),...([...groups.entries()].map(([k,arr])=>h('div',{class:'sec',style:'margin-top:10px'},h('h4',{text:k}),...arr.map(f=>h('div',{class:'row'},h('div',{style:'flex:1'},h('b',{text:f.name}),h('div',{class:'ms',text:f.type||''})),btn('필기로 열기',()=>gdOpenNote(f),'btn'))))))));
 }
-async function gcOpenNote(f) {
-  toast('받는 중…');
-  try { const file = await gcFetchFile(f); showTab('pnote'); await pnOpen(null); await pnImport(file); }
-  catch (e) { toast(e.message || '받지 못했어요.'); }
-}
-async function gcImportAll(list) {
-  let ok = 0;
-  for (let i = 0; i < list.length; i++) {
-    toast('가져오는 중 ' + (i + 1) + '/' + list.length);
-    try { const file = await gcFetchFile(list[i]); await pnOpen(null); await pnImport(file); await pnClose(); ok++; } catch { /* 한 개 실패해도 계속해요 */ }
-  }
-  PN.editing = false; toast(ok + '개를 내 필기 노트로 가져왔어요.');
-}
-async function drawGc() {
-  const body = $('perfBody');
-  fill(body, msg('불러오는 중…'));
-  const st = await api('GET', '/api/gc/status');
-  if (PF.view !== 'gc') return;
-  if (!st) { fill(body, msg('서버에 연결할 수 없어요.')); return; }
-  if (!st.configured) { fill(body, msg('서버에 구글 연동 설정이 아직 없어요.\n(서버 관리자가 README의 "구글 클래스룸 연결"대로 설정해야 해요)')); return; }
-  LS.set('gcLinked', st.linked ? '1' : '');
-  if (!st.linked) {
-    fill(body, h('div', { class: 'sec' }, h('h3', { text: '구글 클래스룸 연결' }),
-      h('div', { text: '학교 구글 계정으로 로그인하면 클래스룸에 올라온 학습지(PDF·사진·구글 문서)를 앱으로 가져와 바로 필기할 수 있어요. 읽기 전용이라 클래스룸이나 드라이브를 바꾸지 않아요. 학교에서 외부 앱 연결을 막아 두었으면 연결되지 않을 수 있어요.' }),
-      h('div', { style: 'display:flex;gap:8px;margin-top:12px' },
-        btn('구글로 연결', async () => { const r = await api('GET', '/api/gc/auth'); if (r) window.open(r.url, '_blank'); }, 'btn'),
-        btn('연결했어요 (새로고침)', drawGc, 'btn ghost'))));
-    return;
-  }
-  const d = await api('GET', '/api/gc/files');
-  if (PF.view !== 'gc') return;
-  const unlink = btn('연결 끊기', async () => { if (!confirm('구글 클래스룸 연결을 끊을까요?')) return; await api('POST', '/api/gc/unlink'); LS.set('gcLinked', ''); LS.del('gcSeen'); drawGc(); }, 'lnk adm');
-  if (!d) { fill(body, msg('클래스룸에서 가져오지 못했어요.'), h('div', { style: 'text-align:center' }, btn('다시 시도', drawGc, 'btn ghost'), ' ', unlink)); return; }
-  const seen = gcSeenSet(), fresh = d.files.filter((f) => !seen.has(f.id) && f.openable);
-  const groups = new Map(); d.files.forEach(f => { const k=f.course||'기타'; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(f); });
-  const row = (f) => h('div', { class: 'pfrow' },
-    h('span', { class: 'pfd' + (!seen.has(f.id) ? ' soon' : ''), text: !seen.has(f.id) ? 'NEW' : '·' }),
-    h('div', { class: 'pfm' }, h('b', { text: f.title }), h('span', { text: (f.from || '') + (f.ts ? ' · ' + new Date(f.ts).toISOString().slice(5, 10).replace('-', '.') : '') })),
-    f.openable ? btn('필기로 열기', () => gcOpenNote(f), 'btn small') : h('span', { class: 'ms', style: 'font-size:11px;color:var(--sub)', text: 'PDF·사진만 가능' }));
-  const groupView = [...groups.entries()].map(([course,files]) => { const nf=files.filter(f=>!seen.has(f.id)&&f.openable); return h('div',{class:'sec',style:'padding:10px 14px 4px;margin-bottom:0'},
-    h('div',{class:'r'},h('h3',{text:course}),nf.length?btn('이 과목 '+nf.length+'개 가져오기',async()=>{await gcImportAll(nf);gcMarkSeen(nf);drawGc();},'btn small'):null), files.map(row)); });
-  fill(body,
-    h('div', { class: 'wform' },
-      fresh.length ? btn('새 학습지 ' + fresh.length + '개 모두 노트로 가져오기', async () => { await gcImportAll(fresh); gcMarkSeen(fresh); drawGc(); }, 'btn') : null,
-      btn('목록 새로고침', async () => { await api('GET', '/api/gc/files?fresh=1'); drawGc(); }, 'btn ghost')),
-    d.files.length ? groupView : msg('클래스룸에서 찾은 첨부 파일이 없어요.'),
-    h('div', { style: 'text-align:center;padding:14px' }, unlink));
-}
-// 앱을 열 때 새 학습지가 있는지 조용히 확인
-async function gcCheckNew() {
-  if (!LS.get('gcLinked')) return;
-  try {
-    const r = await fetch(API + '/api/gc/files', { headers: { 'x-uid': uid } });
-    if (!r.ok) return;
-    const d = await r.json(), seen = gcSeenSet(), fresh = d.files.filter((f) => !seen.has(f.id) && f.openable), n = fresh.length;
-    if (n && seen.size) { const by={}; fresh.forEach(f=>by[f.course]=(by[f.course]||0)+1); toast('새 학습지 '+n+'개 · '+Object.entries(by).map(([k,v])=>k+' '+v+'개').join(', ')); }
-    else if (!seen.size) gcMarkSeen(d.files); // 처음 연결했을 때는 알리지 않고 기준만 저장
-  } catch { /* 오프라인이면 건너뛰어요 */ }
-}
-
 // ───────── 오픈소스 라이선스 ─────────
 const LICENSES = [
   ['floating-ui', 'https://github.com/floating-ui/floating-ui', 'MIT License', 'Copyright (c) 2021 Floating UI contributors'],
