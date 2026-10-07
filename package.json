@@ -1,0 +1,15 @@
+{
+  "name": "anon-chat",
+  "version": "1.0.0",
+  "description": "금베 - 닉네임 없는 익명 커뮤니티 (채팅·게시판·쇼츠·1:1·영어사전)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0"
+  }
+}

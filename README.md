@@ -1,0 +1,34 @@
+# 금베 — 닉네임 없는 익명 커뮤니티
+
+채팅 · 게시판 · 쇼츠 · 1:1 · 영어사전 · 대한민국 지도 · 대구과학고 1학년 시간표/급식 · 신청 현황 · 오픈소스 라이선스. 닉네임과 계정 없이 쓰고, 다른 사람에게는 작성자 정보가 보이지 않아요.
+
+## 폴더 구조
+```
+server.js              서버 (외부 패키지 불필요, Node.js 18 이상)
+public/index.html      앱 화면 (웹·APK 공용)
+public/manifest.json
+capacitor.config.json  APK 설정 (앱 이름: 금베)
+test.js                동작 테스트
+```
+
+## 서버 실행
+```
+node server.js     # http://localhost:3000
+node test.js       # 동작 테스트
+```
+환경변수: `PORT`, `ADMIN_KEY`(설정하면 관리자 기능이 켜져요), `DATA_DIR`(글·업로드 저장 위치, 기본 `./data`)
+
+- `NEIS_KEY`: 시간표·급식에 필요해요. [open.neis.go.kr](https://open.neis.go.kr) 에서 무료로 인증키를 받아 서버 환경변수로 넣으세요. 학교 코드는 서버가 "대구과학고등학교"를 NEIS에서 직접 찾아 쓰고(`SCHOOL_CODE`로 직접 지정도 가능), 시간표는 1학년 반 목록을 NEIS에서 받아 보여줘요.
+- 신청 현황(분임토의실·LOD·수강신청)은 관리자가 항목(제목·정원)을 만들면 학생이 신청/취소해요. 신청자는 익명이고 인원수만 보여요.
+- 글·쇼츠·업로드 파일은 `DATA_DIR`에 저장돼요. Render·Railway 무료 플랜은 재배포 때 디스크가 지워지니, 남기고 싶으면 영구 디스크(Volume)를 붙이고 `DATA_DIR`을 그 경로로 지정하세요.
+- 영어사전은 서버가 외부 사전 서비스(dictionaryapi.dev, MyMemory)에 접속해서 가져와요. 서버가 인터넷에 연결돼 있어야 해요.
+- 업로드 한도: 사진 10MB, 영상 40MB(쇼츠는 60초). 아이폰 영상(mov)은 일부 안드로이드에서 재생이 안 될 수 있어서 mp4 권장.
+
+## APK 만들기 (GitHub Actions)
+1. `capacitor.config.json` 의 `server.url` 을 서버 주소로 바꿔요.
+2. 저장소에 올리고 **Actions → Build APK → Run workflow** 실행.
+3. **Artifacts → anon-chat-apk** 에서 `app-debug.apk` 를 받아요.
+
+## 알아둘 점
+- 같은 방 사람들에게는 익명이지만, 서버 운영자는 접속 기록(IP 등)을 볼 수 있어요. 완전한 익명이라고 약속하지는 마세요.
+- 신고 3명이면 자동으로 가려지고, 관리자는 삭제·차단·방 초기화를 할 수 있어요.
