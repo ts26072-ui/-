@@ -32,7 +32,7 @@ const UPLOAD_EXT = {
 // ───────── 저장소 (data/db.json) ─────────
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
-let db = { chat: [], posts: [], shorts: [], threads: [], reports: [], bans: [], blocks: {}, postNo: 0, apps: [] };
+let db = { chat: [], posts: [], shorts: [], threads: [], reports: [], bans: [], blocks: {}, postNo: 0 };
 try { db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) }; } catch { /* 처음 실행 */ }
 let saveTimer = null;
 function saveNow() {
@@ -300,10 +300,6 @@ async function handleSchool(res, url) {
   }
 }
 
-// ───────── 신청 (분임토의실 · LOD · 수강신청) ─────────
-const APP_CATS = ['분임토의실', 'LOD', '수강신청'];
-const appView = (a, uid) => ({ id: a.id, cat: a.cat, title: a.title, desc: a.desc, capacity: a.capacity, count: a.users.length, applied: a.users.includes(uid), open: a.open });
-
 // ───────── API ─────────
 async function handleApi(req, res, url) {
   const p = url.pathname;
@@ -317,7 +313,6 @@ async function handleApi(req, res, url) {
   // 사전
   if (req.method === 'GET' && p === '/api/dict') return handleDict(res, url);
   if (req.method === 'GET' && p.startsWith('/api/school/')) return handleSchool(res, url);
-  if (req.method === 'GET' && p === '/api/apply/list') return json(res, 200, { items: db.apps.map((a) => appView(a, uid)) });
 
   // 관리자 확인 · 목록
   if (p === '/api/admin/check' && req.method === 'GET') {
@@ -446,22 +441,6 @@ async function handleApi(req, res, url) {
     return json(res, 200, { likes: s.likes.length, liked: i < 0 });
   }
 
-  // 신청 / 취소
-  m = /^\/api\/apply\/([a-f0-9]+)\/(join|leave)$/.exec(p);
-  if (m) {
-    const a = db.apps.find((x) => x.id === m[1]);
-    if (!a) return json(res, 404, { error: '없는 항목이에요.' });
-    const i = a.users.indexOf(uid);
-    if (m[2] === 'leave') { if (i >= 0) a.users.splice(i, 1); save(); return json(res, 200, appView(a, uid)); }
-    if (isBanned(uid)) return json(res, 403, banMsg);
-    if (!a.open) return json(res, 400, { error: '신청이 마감됐어요.' });
-    if (i < 0) {
-      if (a.capacity && a.users.length >= a.capacity) return json(res, 409, { error: '정원이 찼어요.' });
-      a.users.push(uid); save();
-    }
-    return json(res, 200, appView(a, uid));
-  }
-
   // 1:1
   if (p === '/api/dm/request') {
     if (isBanned(uid)) return json(res, 403, banMsg);
@@ -536,20 +515,6 @@ async function handleApi(req, res, url) {
       if (!r) return json(res, 404, { error: '이미 처리된 신고예요.' });
       if (body.action === 'ban' && !db.bans.includes(r.reported)) db.bans.push(r.reported);
       db.reports = db.reports.filter((x) => x !== r); save();
-      return json(res, 200, { ok: true });
-    }
-    if (p === '/api/admin/apply/create') {
-      const cat = APP_CATS.includes(body.cat) ? body.cat : '', title = clip(body.title, 40);
-      if (!cat || !title) return json(res, 400, { error: '분류와 제목을 입력해 주세요.' });
-      const a = { id: rid(6), cat, title, desc: clip(body.desc, 120), capacity: Math.min(Math.max(parseInt(body.capacity, 10) || 0, 0), 500), open: true, users: [], ts: Date.now() };
-      db.apps.push(a); save();
-      return json(res, 200, { id: a.id });
-    }
-    if (p === '/api/admin/apply/delete' || p === '/api/admin/apply/toggle') {
-      const a = db.apps.find((x) => x.id === body.id);
-      if (!a) return json(res, 404, { error: '없는 항목이에요.' });
-      if (p.endsWith('delete')) db.apps = db.apps.filter((x) => x !== a); else a.open = !a.open;
-      save();
       return json(res, 200, { ok: true });
     }
     const it = findItem(body.kind, body.id, body.postId);
