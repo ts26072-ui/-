@@ -305,10 +305,10 @@ async function handleSchool(res, url) {
 
 async function handleApi(req, res, url) {
   const p = url.pathname;
+  // EventSource는 커스텀 x-uid 헤더를 보낼 수 없으므로 SSE는 query의 uid로 인증한다.
+  if (p === '/api/events' && req.method === 'GET') return handleEvents(req, res, url);
   const uid = String(req.headers['x-uid'] || '');
   if (!isUid(uid)) return json(res, 400, { error: '잘못된 요청이에요. 앱을 새로고침해 주세요.' });
-  // 실시간 채팅 SSE
-  if (p === '/api/events' && req.method === 'GET') return handleEvents(req, res, url);
 // ───────── 구글 드라이브 공유 폴더 학습지 (API/OAuth 불필요) ─────────
 // 사용자가 "링크가 있는 모든 사용자"로 공유한 금베 폴더를 읽습니다.
 const gdShares = new Map();
