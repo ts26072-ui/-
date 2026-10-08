@@ -11,7 +11,9 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const ADMIN_KEY = process.env.ADMIN_KEY || '';
+// ADMIN_KEY가 배포 환경에 설정되지 않아도 관리자 기능을 사용할 수 있도록 기본 키를 제공합니다.
+// 공개 배포 전에는 반드시 환경변수 ADMIN_KEY를 더 강한 값으로 설정하세요.
+const ADMIN_KEY = process.env.ADMIN_KEY || 'geumbee-admin';
 const DICT_URL = process.env.DICT_URL || 'https://api.dictionaryapi.dev/api/v2/entries/en/';
 const TRANSLATE_URL = process.env.TRANSLATE_URL || 'https://api.mymemory.translated.net/get';
 
@@ -600,9 +602,16 @@ async function handleGd(req,res,url,uid){
   }
 
   // 관리자 동작
+  if (p === '/api/chat/reset' && req.method === 'POST') {
+    if (!isAdm) return json(res, 403, { error: '관리자만 할 수 있어요.' });
+    db.chat = []; save();
+    broadcast({ type: 'room_reset' });
+    return json(res, 200, { ok: true, reset: true });
+  }
+
   if (p.startsWith('/api/admin/')) {
     if (!isAdm) return json(res, 403, { error: '관리자만 할 수 있어요.' });
-    if (p === '/api/admin/reset-room' || p === '/api/chat/reset') {
+    if (p === '/api/admin/reset-room') {
       db.chat = []; save();
       broadcast({ type: 'room_reset' });
       return json(res, 200, { ok: true, reset: true });
