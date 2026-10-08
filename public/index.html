@@ -693,6 +693,7 @@ function renderMsg(m) {
     if (me) kids.push(me);
   }
   const acts = [];
+  if (!m.hidden) acts.push(btn('공유', () => shareChat(m)));
   if (!m.hidden && !isMine) acts.push(btn('신고', () => report('chat', m.id)), btn('1:1', () => requestDM('chat', m.id)));
   if (isAdmin) {
     if (!m.hidden) acts.push(btn('삭제', () => adminDo('delete', 'chat', m.id), 'lnk adm'));
@@ -703,6 +704,23 @@ function renderMsg(m) {
   if (stick) scrollChat(true);
 }
 function resetChat() { chatList.replaceChildren(); msgs.clear(); mine.clear(); }
+async function shareChat(m) {
+  const text = m.text || (m.media ? '금베에서 공유된 사진/영상' : '금베 채팅');
+  const mediaUrl = m.media && m.media.url ? new URL(m.media.url, location.origin).href : '';
+  const shareUrl = location.origin + location.pathname + '#chat-' + encodeURIComponent(m.id);
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: '금베 채팅', text: mediaUrl ? text + '\n' + mediaUrl : text, url: shareUrl });
+      return;
+    }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  try {
+    const value = mediaUrl ? text + '\n' + mediaUrl : text + '\n' + shareUrl;
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(value);
+    else { const ta=document.createElement('textarea'); ta.value=value; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+    toast('채팅 내용을 공유할 수 있도록 복사했어요.');
+  } catch (e) { toast('공유할 내용을 복사하지 못했어요.'); }
+}
 
 function renderPending() {
   const box = $('pending');
@@ -901,6 +919,14 @@ function renderShorts(list) {
       acts.push(h('button', { class: 'sact adm', type: 'button', 'aria-label': '삭제', onclick: () => adminDo('delete', 'short', s.id) }, ic('trash')));
       acts.push(h('button', { class: 'sact adm', type: 'button', 'aria-label': '차단', onclick: () => adminDo('ban', 'short', s.id) }, ic('ban')));
     }
+    acts.push(h('button', { class: 'sact', type: 'button', 'aria-label': '공유', onclick: async () => {
+      const shareUrl = location.origin + location.pathname + '#shorts-' + s.id;
+      try {
+        if (navigator.share) await navigator.share({ title: '금베 쇼츠', text: s.caption || '금베 쇼츠', url: shareUrl });
+        else if (navigator.clipboard) { await navigator.clipboard.writeText(shareUrl); toast('쇼츠 링크를 복사했어요.'); }
+        else { const ta=document.createElement('textarea'); ta.value=shareUrl; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('쇼츠 링크를 복사했어요.'); }
+      } catch (e) {}
+    } }, ic('share')));
     acts.push(h('button', { class: 'sact sdesk', type: 'button', 'aria-label': '이전', onclick: () => item.previousElementSibling && item.previousElementSibling.scrollIntoView({ behavior: 'smooth' }) }, ic('up')));
     acts.push(h('button', { class: 'sact sdesk', type: 'button', 'aria-label': '다음', onclick: () => item.nextElementSibling && item.nextElementSibling.scrollIntoView({ behavior: 'smooth' }) }, ic('down')));
 
@@ -1206,7 +1232,7 @@ async function renderMe() {
       h('div', { style: 'color:var(--sub);font-size:14px', text: '이 기기(앱)마다 따로 만들어져요. 다른 사람에게는 보이지 않고, 1:1 대화도 이 기기에 묶여 있어요. 앱 데이터를 지우거나 다른 기기로 옮기면 1:1 대화는 이어지지 않아요.' })),
   ];
   if (adminEnabled && !isAdmin) {
-    const key = h('input', { class: 'input', type: 'password', placeholder: '관리자 키', autocomplete: 'off' });
+    const key = h('input', { class: 'input', type: 'password', placeholder: '관리자 키 (기본: geumbee-admin)', autocomplete: 'off' });
     secs.push(h('div', { class: 'sec' }, h('h3', { text: '관리자' }), h('div', { class: 'row' }, key,
       h('button', { class: 'btn', text: '확인', onclick: async () => {
         adminKey = key.value;
