@@ -602,10 +602,10 @@ async function handleGd(req,res,url,uid){
   // 관리자 동작
   if (p.startsWith('/api/admin/')) {
     if (!isAdm) return json(res, 403, { error: '관리자만 할 수 있어요.' });
-    if (p === '/api/admin/reset-room') {
+    if (p === '/api/admin/reset-room' || p === '/api/chat/reset') {
       db.chat = []; save();
       broadcast({ type: 'room_reset' });
-      return json(res, 200, { ok: true });
+      return json(res, 200, { ok: true, reset: true });
     }
     if (p === '/api/admin/report') {
       const r = db.reports.find((x) => x.id === body.id);
