@@ -255,7 +255,7 @@
   <main>
     <!-- 채팅 -->
     <section id="tab-chat" class="tab active">
-      <div class="top"><div class="title">금베 <span class="meta">· <span id="online">0</span>명 접속 중</span></div></div>
+      <div class="top"><div class="title">금베 <span class="meta">· <span id="online">0</span>명 접속 중</span></div><button class="btn small danger" id="chatReset" hidden type="button">채팅 초기화</button></div>
       <div class="banner">특정인을 저격하거나 사진·영상으로 괴롭히는 글은 신고해 주세요. 3명이 신고하면 자동으로 가려져요.</div>
       <div id="chatList"></div>
       <div class="upstat" id="upstat" hidden></div>
@@ -711,6 +711,12 @@ function renderPending() {
   if (!pendingMedia) return;
   box.append(pendingChip(pendingMedia), btn('취소', () => { pendingMedia = null; renderPending(); }));
 }
+$('chatReset').onclick = async () => {
+  if (!isAdmin) return toast('관리자만 초기화할 수 있어요.');
+  if (!confirm('채팅방의 모든 대화를 삭제하고 새 방을 열까요?')) return;
+  const r = await api('POST', '/api/chat/reset');
+  if (r) toast('채팅방을 초기화했어요.');
+};
 $('attach').onclick = () => pickFile(async (f) => { const r = await uploadFile(f, $('upstat')); if (r) { pendingMedia = r; renderPending(); } });
 $('chatForm').onsubmit = async (e) => {
   e.preventDefault();
@@ -1244,13 +1250,14 @@ async function adminCheck(loud) {
   isAdmin = ok;
   return ok;
 }
-function rerenderAll() { [...msgs.values()].forEach(renderMsg); if (sLoaded) loadShorts(); }
+function rerenderAll() { $('chatReset').hidden = !(adminEnabled && isAdmin); [...msgs.values()].forEach(renderMsg); if (sLoaded) loadShorts(); }
 
 // ───────── 실시간 연결 ─────────
 function handle(m) {
   switch (m.type) {
     case 'hello':
       adminEnabled = m.adminEnabled;
+      $('chatReset').hidden = !(adminEnabled && isAdmin);
       resetChat();
       m.mine.forEach((id) => mine.add(id));
       m.messages.forEach(renderMsg);
@@ -1265,7 +1272,7 @@ function handle(m) {
       break;
     case 'update': renderMsg(m.message); break;
     case 'count': $('online').textContent = m.count; break;
-    case 'room_reset': resetChat(); toast('방이 새로 열렸어요.'); break;
+    case 'room_reset': resetChat(); toast('채팅방이 초기화됐어요.'); break;
     case 'dm':
       if (m.kind === 'request') toast('누군가 1:1 대화를 요청했어요.');
       loadDMs();
